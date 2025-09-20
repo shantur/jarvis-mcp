@@ -38,6 +38,11 @@ class VoiceInterfaceClient {
         this.alwaysOnMode = false;
         this.restartTimeout = null;
         
+        // Speech session tracking
+        this.currentSessionTranscript = '';
+        this.speechTimeout = null;
+        this.speechTimeoutDuration = 2000; // 2 seconds of silence before sending
+        
         this.initializeSpeechRecognition();
         this.initializeEventSource();
         this.setupEventListeners();
@@ -74,13 +79,17 @@ class VoiceInterfaceClient {
             });
         }
         
-        this.recognition.continuous = true;
+        this.recognition.continuous = false; // Change to false for mobile
         this.recognition.interimResults = true;
         this.recognition.lang = 'en-US';
+        
+        // Track accumulated transcript for current session
+        this.currentSessionTranscript = '';
         
         this.recognition.onstart = () => {
             console.log('[Speech] Recognition started');
             this.isListening = true;
+            this.currentSessionTranscript = ''; // Reset transcript for new session
             this.updateVoiceUI();
             this.setVoiceState(true);
         };
@@ -91,67 +100,52 @@ class VoiceInterfaceClient {
             this.updateVoiceUI();
             this.setVoiceState(false);
             
+            // Send final accumulated transcript if we have any
+            if (this.currentSessionTranscript && this.currentSessionTranscript.trim()) {
+                const finalTranscript = this.currentSessionTranscript.trim();
+                console.log('[Speech] Sending final session transcript:', finalTranscript);
+                this.sendVoiceInput(finalTranscript);
+                this.currentSessionTranscript = '';
+            }
+            
             // Auto-restart if in always-on mode and not speaking
             if (this.alwaysOnMode && !this.isSpeaking) {
                 console.log('[Speech] Auto-restarting recognition in always-on mode');
                 this.restartTimeout = setTimeout(() => {
                     this.startListening();
-                }, 500); // Small delay to prevent rapid restarts
+                }, 1000); // Longer delay for non-continuous mode
             }
         };
         
         this.recognition.onresult = (event) => {
             console.log('[Speech] Recognition result event:', event);
-            let finalTranscript = '';
-            let interimTranscript = '';
             
-            for (let i = event.resultIndex; i < event.results.length; i++) {
-                const result = event.results[i];
-                const transcript = result[0].transcript;
+            // In non-continuous mode, just take the last result
+            if (event.results.length > 0) {
+                const lastResult = event.results[event.results.length - 1];
+                const transcript = lastResult[0].transcript;
                 
-                console.log('[Speech] Processing result:', { 
-                    index: i, 
-                    isFinal: result.isFinal, 
+                console.log('[Speech] Last result:', { 
+                    isFinal: lastResult.isFinal, 
                     transcript: transcript,
                     transcriptType: typeof transcript 
                 });
                 
                 // Validate transcript before using it
                 if (transcript && typeof transcript === 'string' && transcript !== 'undefined' && transcript.trim() !== '') {
-                    if (result.isFinal) {
-                        finalTranscript += transcript;
-                    } else {
-                        interimTranscript += transcript;
+                    if (lastResult.isFinal) {
+                        this.currentSessionTranscript = transcript.trim();
+                        console.log('[Speech] Final transcript set to:', this.currentSessionTranscript);
                     }
+                    
+                    // Display current speech
+                    this.speechDisplay.textContent = transcript;
+                    this.speechDisplay.classList.add('active');
                 } else {
-                    console.warn('[Speech] Invalid or undefined transcript:', { transcript, type: typeof transcript });
+                    console.warn('[Speech] Invalid transcript:', { transcript, type: typeof transcript });
+                    this.speechDisplay.textContent = 'Listening...';
+                    this.speechDisplay.classList.remove('active');
                 }
-            }
-            
-            console.log('[Speech] Final transcripts:', { finalTranscript, interimTranscript });
-            
-            // Display current speech
-            const displayText = interimTranscript || finalTranscript;
-            if (displayText && displayText.trim()) {
-                this.speechDisplay.textContent = displayText;
-                this.speechDisplay.classList.add('active');
-            } else {
-                this.speechDisplay.textContent = 'Listening...';
-                this.speechDisplay.classList.remove('active');
-            }
-            
-            // Send final transcript with extra validation
-            if (finalTranscript && typeof finalTranscript === 'string' && finalTranscript.trim() && finalTranscript.trim() !== 'undefined') {
-                const cleanTranscript = finalTranscript.trim();
-                console.log('[Speech] Sending final transcript:', cleanTranscript);
-                this.sendVoiceInput(cleanTranscript);
-            } else {
-                console.log('[Speech] Not sending transcript:', { 
-                    finalTranscript, 
-                    type: typeof finalTranscript, 
-                    trimmed: finalTranscript?.trim(),
-                    isUndefinedString: finalTranscript?.trim() === 'undefined'
-                });
             }
         };
         
