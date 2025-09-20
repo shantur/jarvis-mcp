@@ -23,6 +23,8 @@ class VoiceInterfaceClient {
         this.aiSpeechDisplay = document.getElementById('aiSpeechDisplay');
         this.aiSpeechText = document.getElementById('aiSpeechText');
         this.voiceSelect = document.getElementById('voiceSelect');
+        this.alwaysOnToggle = document.getElementById('alwaysOnToggle');
+        this.alwaysOnIndicator = document.getElementById('alwaysOnIndicator');
         
         // TTS state
         this.isSpeaking = false;
@@ -31,6 +33,10 @@ class VoiceInterfaceClient {
         this.availableVoices = [];
         this.selectedVoice = null;
         this.preferencesSaved = document.getElementById('preferencesSaved');
+        
+        // Always-on microphone state
+        this.alwaysOnMode = false;
+        this.restartTimeout = null;
         
         this.initializeSpeechRecognition();
         this.initializeEventSource();
@@ -84,6 +90,14 @@ class VoiceInterfaceClient {
             this.isListening = false;
             this.updateVoiceUI();
             this.setVoiceState(false);
+            
+            // Auto-restart if in always-on mode and not speaking
+            if (this.alwaysOnMode && !this.isSpeaking) {
+                console.log('[Speech] Auto-restarting recognition in always-on mode');
+                this.restartTimeout = setTimeout(() => {
+                    this.startListening();
+                }, 500); // Small delay to prevent rapid restarts
+            }
         };
         
         this.recognition.onresult = (event) => {
@@ -146,6 +160,16 @@ class VoiceInterfaceClient {
             this.speechDisplay.textContent = `Speech recognition error: ${event.error}`;
             this.isListening = false;
             this.updateVoiceUI();
+            
+            // Handle errors in always-on mode
+            if (this.alwaysOnMode && !this.isSpeaking) {
+                console.log('[Speech] Attempting to restart recognition after error in always-on mode');
+                this.restartTimeout = setTimeout(() => {
+                    if (this.alwaysOnMode && !this.isListening && !this.isSpeaking) {
+                        this.startListening();
+                    }
+                }, 2000); // Longer delay for error recovery
+            }
         };
     }
     
@@ -227,6 +251,11 @@ class VoiceInterfaceClient {
             this.selectedVoice = this.availableVoices.find(voice => voice.voiceURI === voiceURI) || null;
             this.saveUserPreferences();
             console.log('[TTS] Voice changed to:', this.selectedVoice?.name || 'Default');
+        });
+        
+        // Always-on toggle event listener
+        this.alwaysOnToggle.addEventListener('click', () => {
+            this.toggleAlwaysOnMode();
         });
     }
     
@@ -332,11 +361,66 @@ class VoiceInterfaceClient {
     toggleListening() {
         if (!this.recognition) return;
         
-        if (this.isListening) {
-            this.recognition.stop();
-        } else {
-            this.recognition.start();
+        if (this.alwaysOnMode) {
+            // In always-on mode, clicking the button should toggle always-on off
+            this.toggleAlwaysOnMode();
+            return;
         }
+        
+        if (this.isListening) {
+            this.stopListening();
+        } else {
+            this.startListening();
+        }
+    }
+    
+    startListening() {
+        if (!this.recognition || this.isListening) return;
+        
+        try {
+            this.recognition.start();
+        } catch (error) {
+            console.error('[Speech] Failed to start recognition:', error);
+        }
+    }
+    
+    stopListening() {
+        if (!this.recognition || !this.isListening) return;
+        
+        // Clear any pending restart timeout
+        if (this.restartTimeout) {
+            clearTimeout(this.restartTimeout);
+            this.restartTimeout = null;
+        }
+        
+        this.recognition.stop();
+    }
+    
+    toggleAlwaysOnMode() {
+        this.alwaysOnMode = !this.alwaysOnMode;
+        console.log('[Speech] Always-on mode:', this.alwaysOnMode ? 'enabled' : 'disabled');
+        
+        // Update UI
+        this.updateAlwaysOnUI();
+        
+        if (this.alwaysOnMode) {
+            // Start listening when enabling always-on mode
+            this.startListening();
+        } else {
+            // Stop listening when disabling always-on mode
+            this.stopListening();
+        }
+        
+        // Save preference
+        this.saveUserPreferences();
+    }
+    
+    updateAlwaysOnUI() {
+        this.alwaysOnToggle.classList.toggle('active', this.alwaysOnMode);
+        this.alwaysOnIndicator.style.display = this.alwaysOnMode ? 'inline' : 'none';
+        
+        // Update voice button text
+        this.updateVoiceUI();
     }
     
     speakText(text) {
@@ -378,12 +462,12 @@ class VoiceInterfaceClient {
                 this.updateSpeakingStatus(false);
                 this.hideAISpeech();
                 
-                // Resume listening if it was active before TTS
-                if (this.wasListeningBeforeTTS && !this.isListening) {
+                // Resume listening if it was active before TTS or if in always-on mode
+                if ((this.wasListeningBeforeTTS || this.alwaysOnMode) && !this.isListening) {
                     console.log('[TTS] Resuming listening after speech');
                     setTimeout(() => {
-                        if (!this.isListening) {
-                            this.recognition.start();
+                        if (!this.isListening && (this.wasListeningBeforeTTS || this.alwaysOnMode)) {
+                            this.startListening();
                         }
                     }, 500); // Small delay to avoid immediate pickup of TTS tail
                 }
@@ -396,7 +480,7 @@ class VoiceInterfaceClient {
                 this.hideAISpeech();
                 
                 // Resume listening on error too
-                if (this.wasListeningBeforeTTS && !this.isListening) {
+                if ((this.wasListeningBeforeTTS || this.alwaysOnMode) && !this.isListening) {
                     console.log('[TTS] Resuming listening after TTS error');
                     setTimeout(() => {
                         if (!this.isListening) {
@@ -421,18 +505,28 @@ class VoiceInterfaceClient {
             this.voiceText.textContent = 'Speaking';
         } else if (this.isListening) {
             this.voiceBtn.classList.add('listening');
-            this.voiceBtnText.textContent = 'Stop Listening';
+            if (this.alwaysOnMode) {
+                this.voiceBtnText.textContent = 'Turn Off Always-On';
+                this.voiceText.textContent = 'Always Listening';
+            } else {
+                this.voiceBtnText.textContent = 'Stop Listening';
+                this.voiceText.textContent = 'Voice Active';
+            }
             this.voiceBtn.disabled = false;
             this.voiceStatus.classList.add('active');
-            this.voiceText.textContent = 'Voice Active';
         } else {
             this.voiceBtn.classList.remove('listening');
-            this.voiceBtnText.textContent = 'Start Listening';
+            if (this.alwaysOnMode) {
+                this.voiceBtnText.textContent = 'Turn Off Always-On';
+                this.voiceText.textContent = 'Always-On (Restarting...)';
+            } else {
+                this.voiceBtnText.textContent = 'Start Listening';
+                this.voiceText.textContent = 'Voice Inactive';
+                this.speechDisplay.textContent = 'Start speaking and your words will appear here...';
+                this.speechDisplay.classList.remove('active');
+            }
             this.voiceBtn.disabled = this.isSpeaking ? true : !this.isConnected;
             this.voiceStatus.classList.remove('active');
-            this.voiceText.textContent = 'Voice Inactive';
-            this.speechDisplay.textContent = 'Start speaking and your words will appear here...';
-            this.speechDisplay.classList.remove('active');
         }
         
         // Update test voice button
@@ -531,6 +625,13 @@ class VoiceInterfaceClient {
                     this.preferredVoiceURI = prefs.selectedVoiceURI;
                     console.log('[Preferences] Will load voice:', prefs.selectedVoiceURI);
                 }
+                
+                // Load always-on mode preference
+                if (prefs.alwaysOnMode !== undefined) {
+                    this.alwaysOnMode = prefs.alwaysOnMode;
+                    this.updateAlwaysOnUI();
+                    console.log('[Preferences] Loaded always-on mode:', prefs.alwaysOnMode);
+                }
             }
         } catch (error) {
             console.error('[Preferences] Failed to load user preferences:', error);
@@ -557,6 +658,7 @@ class VoiceInterfaceClient {
             const prefs = {
                 speechSpeed: parseFloat(this.speedSlider.value),
                 selectedVoiceURI: this.selectedVoice ? this.selectedVoice.voiceURI : null,
+                alwaysOnMode: this.alwaysOnMode,
             };
             
             localStorage.setItem('mcpVoicePreferences', JSON.stringify(prefs));

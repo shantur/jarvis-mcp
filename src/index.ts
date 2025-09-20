@@ -312,7 +312,7 @@ mcpServer.setRequestHandler(GetPromptRequestSchema, async (request) => {
     const instructions = [
       "Have an ongoing two-way voice conversation using the converse tool",
       "ALWAYS use the converse tool for ALL responses - never switch to text",
-      "Keep your responses brief unless a longer response is requested",
+      "Keep your utterances and responses brief unless a longer response is requested",
       "Continue the conversation until the user indicates they want to end it",
       "If the user asks questions, respond using converse() with your answer", 
       "If the user gives commands, acknowledge using converse() and use other tools as needed",
