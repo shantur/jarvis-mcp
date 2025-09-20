@@ -67,6 +67,18 @@ export class VoiceQueue {
     return pending;
   }
 
+  // Mark a specific input as delivered by ID
+  deliverSpecificInput(inputId: string): VoiceInput | null {
+    const input = this.inputs.find(item => item.id === inputId && item.status === 'pending');
+    if (input) {
+      input.status = 'delivered';
+      console.error(`[Queue] Delivered specific input: "${input.text}" (ID: ${inputId})`);
+      this.broadcastQueueUpdate();
+      return input;
+    }
+    return null;
+  }
+
   // Get recent inputs for display
   getRecentInputs(limit: number = 10): VoiceInput[] {
     return this.inputs

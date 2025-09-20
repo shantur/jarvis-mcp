@@ -8,7 +8,7 @@ This OpenCode plugin integrates with the MCP Voice Interface to enable voice mes
 - **Smart Event Monitoring**: Automatically checks for voice messages on various OpenCode events
 - **Configurable Polling**: Customizable polling intervals and message limits
 - **Voice Status Tools**: Built-in tools to monitor and configure voice integration
-- **Message Preservation**: Voice messages remain pending in MCP interface until explicitly consumed
+- **Message Consumption**: Voice messages are consumed after forwarding and no longer available to `converse()` tool
 
 ## Installation
 
@@ -74,7 +74,7 @@ voice_configure(url="https://localhost:5114", autoForward=true, pollInterval=300
 
 3. **Message Forwarding**: When pending messages are found, they are forwarded to the current OpenCode session via the internal API
 
-4. **Message Preservation**: Messages remain in "pending" status in the MCP interface and are not marked as consumed, allowing the regular `converse` tool to still access them
+4. **Message Consumption**: After successful forwarding, messages are marked as delivered/consumed and are no longer available to the `converse()` tool to prevent duplicate processing
 
 5. **Non-blocking Operation**: The forwarding process doesn't block or interfere with ongoing OpenCode operations
 

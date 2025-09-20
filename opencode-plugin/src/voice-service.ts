@@ -83,7 +83,7 @@ export class VoiceMessageService {
         console.log(`[Voice Service] Found ${messagesFound} pending messages`);
       }
 
-      // Get pending messages (but don't consume them)
+      // Get pending messages
       const messages = await this.fetchPendingMessages();
       if (!messages || messages.length === 0) {
         return { messagesFound, messagesForwarded: 0, errors: [] };
@@ -94,11 +94,16 @@ export class VoiceMessageService {
       
       for (const message of messagesToForward) {
         try {
+          // Forward the message to OpenCode session
           await this.forwardMessageToSession(message);
+          
+          // IMPORTANT: Consume the message from MCP so it's no longer available to converse() tool
+          await this.consumeMessage(message);
+          
           messagesForwarded++;
           
           if (this.config.debug) {
-            console.log(`[Voice Service] Forwarded message: "${message.text}"`);
+            console.log(`[Voice Service] Forwarded and consumed message: "${message.text}"`);
           }
         } catch (error) {
           const errorMsg = `Failed to forward message "${message.text}": ${error}`;
@@ -216,6 +221,43 @@ export class VoiceMessageService {
       
     } catch (error) {
       throw new Error(`Failed to forward to session: ${error}`);
+    }
+  }
+
+  /**
+   * Consume/deliver a voice message so it's no longer available to converse() tool
+   * This calls the MCP voice interface to mark the message as delivered
+   */
+  private async consumeMessage(message: VoiceMessage): Promise<void> {
+    try {
+      // Call the deliver-input API endpoint to consume the specific message
+      // This marks it as delivered so it's no longer available to converse() tool
+      const response = await fetch(`${this.config.voiceInterfaceUrl}/api/deliver-input`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          inputId: message.id
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to consume message');
+      }
+      
+      if (this.config.debug) {
+        console.log(`[Voice Service] Message ${message.id} consumed:`, result);
+      }
+      
+    } catch (error) {
+      throw new Error(`Failed to consume message: ${error}`);
     }
   }
 }

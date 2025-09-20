@@ -107,4 +107,32 @@ export function createBrowserInterface(
       clearedCount: cleared
     });
   });
+
+  // API: Deliver/consume specific voice input by ID
+  app.post('/api/deliver-input', (req, res) => {
+    const { inputId } = req.body;
+    
+    if (!inputId || typeof inputId !== 'string') {
+      return res.status(400).json({ error: 'inputId is required and must be a string' });
+    }
+    
+    const delivered = voiceQueue.deliverSpecificInput(inputId);
+    
+    if (delivered) {
+      res.json({
+        success: true,
+        delivered: {
+          id: delivered.id,
+          text: delivered.text,
+          timestamp: delivered.timestamp,
+          status: delivered.status
+        }
+      });
+    } else {
+      res.status(404).json({
+        success: false,
+        error: 'Voice input not found or already delivered'
+      });
+    }
+  });
 }

@@ -62,7 +62,7 @@ cd opencode-plugin
 ./build.sh
 ```
 
-The plugin enables voice message forwarding to OpenCode sessions even when they're busy, providing seamless voice integration.
+The plugin enables voice message forwarding to OpenCode sessions even when they're busy. Messages are consumed after forwarding to prevent duplicate processing.
 
 ## Usage in AI Conversations
 
