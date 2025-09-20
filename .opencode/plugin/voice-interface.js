@@ -159,7 +159,7 @@ class VoiceMessageService {
      */
     async forwardCombinedMessages(sessionID, combinedText) {
         try {
-            await this.client.session.prompt({
+            this.client.session.prompt({
                 path: {
                     id: sessionID
                 },

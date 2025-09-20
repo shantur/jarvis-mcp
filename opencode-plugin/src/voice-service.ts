@@ -186,7 +186,7 @@ export class VoiceMessageService {
    */
   private async forwardCombinedMessages(sessionID: string, combinedText: string): Promise<void> {
     try {
-      await this.client.session.prompt({
+      this.client.session.prompt({
         path: {
           id: sessionID
         },
