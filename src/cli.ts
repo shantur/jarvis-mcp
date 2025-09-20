@@ -68,8 +68,8 @@ Usage:
 
 Options:
   --install-claude-config      Install configuration for Claude Desktop
-  --install-opencode-config    Install configuration for OpenCode/Claude Code  
-  --install-claude-code-config Install configuration for Claude Code CLI
+  --install-opencode-config    Install configuration for OpenCode (creates opencode.json)
+  --install-claude-code-config Install configuration for Claude Code CLI (creates .mcp.json)
   --local                      Install config in current directory
   --global                     Install config globally (for Claude Desktop)
   --help, -h                   Show this help message
@@ -78,7 +78,7 @@ Options:
 Examples:
   npx mcp-voice-interface                                     # Run the MCP server
   npx mcp-voice-interface --install-claude-config            # Setup for Claude Desktop
-  npx mcp-voice-interface --install-opencode-config --local  # Setup for OpenCode in current dir
+  npx mcp-voice-interface --install-opencode-config --local  # Setup for OpenCode in current dir  
   npx mcp-voice-interface --install-claude-code-config       # Setup for Claude Code CLI
   
 After installation:
@@ -136,30 +136,32 @@ function installClaudeConfig() {
 
 function installOpencodeConfig(useLocal: boolean) {
   const configDir = useLocal ? process.cwd() : homedir();
-  const configFile = join(configDir, '.mcp.json');
+  const configFile = join(configDir, 'opencode.json');
   
-  console.log(`Installing MCP Voice Interface for OpenCode/Claude Code...`);
+  console.log(`Installing MCP Voice Interface for OpenCode...`);
   console.log(`Config location: ${configFile}`);
   
   const config = {
-    mcpServers: {
+    "$schema": "https://opencode.ai/config.json",
+    mcp: {
       'mcp-voice-interface': {
-        command: 'npx',
-        args: ['mcp-voice-interface']
+        type: 'local',
+        command: ['npx', 'mcp-voice-interface'],
+        enabled: true
       }
     }
   };
   
   try {
     writeFileSync(configFile, JSON.stringify(config, null, 2));
-    console.log('✅ OpenCode/Claude Code configuration installed successfully');
+    console.log('✅ OpenCode configuration installed successfully');
     console.log(`✅ Config file: ${configFile}`);
     console.log('');
     console.log('Next steps:');
     if (useLocal) {
-      console.log('1. Make sure you\'re in this directory when starting Claude Code');
+      console.log('1. Make sure you\'re in this directory when starting OpenCode');
     }
-    console.log('2. Start Claude Code with MCP support');
+    console.log('2. Start OpenCode');
     console.log('3. Use the "converse" tool for voice conversations');
     console.log('4. Browser interface will open at https://localhost:5114');
   } catch (error) {
@@ -175,6 +177,7 @@ function installClaudeCodeConfig(useLocal: boolean) {
   console.log(`Installing MCP Voice Interface for Claude Code CLI...`);
   console.log(`Config location: ${configFile}`);
   
+  // Claude Code CLI uses .mcp.json with mcpServers format (different from OpenCode)
   const config = {
     mcpServers: {
       'mcp-voice-interface': {

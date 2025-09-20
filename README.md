@@ -32,7 +32,7 @@ npx mcp-voice-interface --install-claude-config
 
 Then restart Claude Desktop app.
 
-### Setup for OpenCode/Claude Code
+### Setup for OpenCode
 
 ```bash
 # Install in current project directory
@@ -106,13 +106,13 @@ The browser interface includes:
 - **Location**: `~/Library/Application Support/Claude/claude_desktop_config.json`
 - **Format**: Standard Claude Desktop MCP configuration
 
-### OpenCode/Claude Code  
-- **Location**: `.mcp.json` in project directory (local) or home directory (global)
-- **Format**: Standard MCP configuration
+### OpenCode
+- **Location**: `opencode.json` in project directory (local) or home directory (global)
+- **Format**: OpenCode MCP configuration with `mcp` object and `type: "local"`
 
 ### Claude Code CLI
 - **Location**: `.mcp.json` in project directory (local) or home directory (global)  
-- **Format**: Standard MCP configuration
+- **Format**: Claude Code CLI MCP configuration with `mcpServers` object
 
 ## Environment Variables
 
