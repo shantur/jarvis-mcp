@@ -1,0 +1,41 @@
+{
+  "name": "@opencode-ai/plugin-voice-interface",
+  "version": "1.0.0",
+  "description": "OpenCode plugin for MCP Voice Interface - enables voice message forwarding when sessions are busy",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "dev": "tsc --watch"
+  },
+  "exports": {
+    ".": {
+      "development": "./src/index.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "keywords": [
+    "opencode",
+    "plugin",
+    "voice",
+    "mcp",
+    "speech"
+  ],
+  "dependencies": {
+    "@opencode-ai/plugin": "^0.10.3",
+    "@opencode-ai/sdk": "^0.10.3",
+    "zod": "^3.20.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

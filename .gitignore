@@ -41,6 +41,10 @@ dist/
 build/
 *.tsbuildinfo
 
+# OpenCode plugin build output
+opencode-plugin/dist/
+opencode-plugin/node_modules/
+
 # Optional npm cache directory
 .npm
 

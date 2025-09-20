@@ -52,6 +52,18 @@ npx mcp-voice-interface --install-claude-code-config --local
 npx mcp-voice-interface --install-claude-code-config --global
 ```
 
+### OpenCode Plugin
+
+For enhanced integration with OpenCode, use the companion plugin in the `opencode-plugin/` folder:
+
+```bash
+# Build and install the OpenCode plugin
+cd opencode-plugin
+./build.sh
+```
+
+The plugin enables voice message forwarding to OpenCode sessions even when they're busy, providing seamless voice integration.
+
 ## Usage in AI Conversations
 
 ### Voice Conversation Tool
