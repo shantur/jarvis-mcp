@@ -2,7 +2,7 @@
 
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { writeFileSync, mkdirSync, existsSync } from 'fs';
+import { writeFileSync, mkdirSync, existsSync, readFileSync } from 'fs';
 import { homedir } from 'os';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -13,6 +13,7 @@ interface CLIOptions {
   installClaudeConfig?: boolean;
   installOpencodeConfig?: boolean;
   installClaudeCodeConfig?: boolean;
+  installOpencodePlugin?: boolean;
   local?: boolean;
   global?: boolean;
   help?: boolean;
@@ -33,6 +34,9 @@ function parseArgs(): CLIOptions {
         break;
       case '--install-claude-code-config':
         options.installClaudeCodeConfig = true;
+        break;
+      case '--install-opencode-plugin':
+        options.installOpencodePlugin = true;
         break;
       case '--local':
         options.local = true;
@@ -70,8 +74,9 @@ Options:
   --install-claude-config      Install configuration for Claude Desktop
   --install-opencode-config    Install configuration for OpenCode (creates opencode.json)
   --install-claude-code-config Install configuration for Claude Code CLI (creates .mcp.json)
-  --local                      Install config in current directory
-  --global                     Install config globally (for Claude Desktop)
+  --install-opencode-plugin    Install OpenCode plugin for voice message forwarding
+  --local                      Install config/plugin in current directory
+  --global                     Install config/plugin globally
   --help, -h                   Show this help message
   --version, -v                Show version information
 
@@ -80,6 +85,7 @@ Examples:
   npx mcp-voice-interface --install-claude-config            # Setup for Claude Desktop
   npx mcp-voice-interface --install-opencode-config --local  # Setup for OpenCode in current dir  
   npx mcp-voice-interface --install-claude-code-config       # Setup for Claude Code CLI
+  npx mcp-voice-interface --install-opencode-plugin --local  # Install OpenCode plugin in project
   
 After installation:
   - Browser interface: https://localhost:5114 (HTTPS, recommended) or http://localhost:5113 (HTTP, fallback)
@@ -205,6 +211,49 @@ function installClaudeCodeConfig(useLocal: boolean) {
   }
 }
 
+function installOpencodePlugin(useLocal: boolean) {
+  const pluginDir = useLocal 
+    ? join(process.cwd(), '.opencode', 'plugin')
+    : join(homedir(), '.config', 'opencode', 'plugin');
+  const pluginFile = join(pluginDir, 'voice-interface.js');
+  
+  console.log(`Installing OpenCode Voice Interface Plugin...`);
+  console.log(`Plugin location: ${pluginFile}`);
+  
+  // Read the built plugin file
+  const pluginSourcePath = join(packageRoot, 'opencode-plugin', 'dist', 'plugin.js');
+  
+  try {
+    // Create plugin directory if it doesn't exist
+    mkdirSync(pluginDir, { recursive: true });
+    
+    // Copy the plugin file
+    const pluginContent = readFileSync(pluginSourcePath, 'utf-8');
+    writeFileSync(pluginFile, pluginContent);
+    
+    console.log('✅ OpenCode plugin installed successfully');
+    console.log(`✅ Plugin file: ${pluginFile}`);
+    console.log('');
+    console.log('Next steps:');
+    if (useLocal) {
+      console.log('1. Make sure you\'re in this directory when starting OpenCode');
+    }
+    console.log('2. Start OpenCode');
+    console.log('3. Plugin will automatically load and monitor for voice messages');
+    console.log('4. Start MCP Voice Interface server: npx mcp-voice-interface');
+    console.log('5. Use voice tools: voice_status(), voice_forward_now(), voice_configure()');
+    console.log('');
+    console.log('Environment variables (optional):');
+    console.log('  VOICE_INTERFACE_URL=http://localhost:5113');
+    console.log('  VOICE_POLL_INTERVAL=2000');
+    console.log('  VOICE_MAX_MESSAGES=5');
+    console.log('  VOICE_DEBUG=true');
+  } catch (error) {
+    console.error('❌ Failed to install OpenCode plugin:', error);
+    process.exit(1);
+  }
+}
+
 async function runMCPServer() {
   console.log('Starting MCP Voice Interface...');
   
@@ -246,6 +295,12 @@ async function main() {
   if (options.installClaudeCodeConfig) {
     const useLocal = options.local || !options.global;
     installClaudeCodeConfig(useLocal);
+    return;
+  }
+  
+  if (options.installOpencodePlugin) {
+    const useLocal = options.local || !options.global;
+    installOpencodePlugin(useLocal);
     return;
   }
   

@@ -1,5 +1,7 @@
-import type { Plugin, PluginInput, Hooks, Event, ToolContext } from "./types.js";
+import type { Plugin, PluginInput, Hooks } from "@opencode-ai/plugin";
+import type { Event } from "@opencode-ai/sdk";
 import { VoiceMessageService } from "./voice-service";
+import { VoiceLogger } from "./voice-logger";
 
 /**
  * OpenCode Plugin for MCP Voice Interface
@@ -20,7 +22,7 @@ const plugin: Plugin = async (input: PluginInput): Promise<Hooks> => {
   
   // Initialize voice message service
   const voiceService = new VoiceMessageService(client, {
-    // Default to localhost voice interface
+    // Default to HTTP localhost voice interface (more reliable for background operations)
     voiceInterfaceUrl: process.env.VOICE_INTERFACE_URL || 'http://localhost:5113',
     // Poll interval for checking voice messages
     pollInterval: parseInt(process.env.VOICE_POLL_INTERVAL || '2000'), // 2 seconds
@@ -30,12 +32,30 @@ const plugin: Plugin = async (input: PluginInput): Promise<Hooks> => {
     debug: process.env.VOICE_DEBUG === 'true'
   });
 
-  console.log('[Voice Plugin] Initialized for project:', project.name);
+  VoiceLogger.log('Initialized ');
 
   return {
-    // Hook into various events to trigger voice message checking
+    // Hook into session-specific events to trigger voice message checking  
     event: async ({ event }: { event: Event }) => {
-      await voiceService.checkAndForwardMessages();
+      VoiceLogger.log('Event triggered:', event.type);
+      
+      // Extract sessionID from session events
+      let sessionID: string | undefined;
+      
+      if (event.type === 'session.idle' && 'sessionID' in event.properties) {
+        sessionID = event.properties.sessionID;
+      } else if (event.type === 'session.updated' && 'info' in event.properties) {
+        sessionID = event.properties.info.id;
+      } else if (event.type === 'session.error' && 'sessionID' in event.properties) {
+        sessionID = event.properties.sessionID;
+      }
+      
+      if (sessionID) {
+        VoiceLogger.log('Session event with ID:', sessionID, 'checking for voice messages');
+        await voiceService.checkAndForwardMessages(sessionID);
+      } else {
+        VoiceLogger.log('Non-session event (ignored):', event.type);
+      }
     },
 
     // Monitor tool execution completion
@@ -43,65 +63,30 @@ const plugin: Plugin = async (input: PluginInput): Promise<Hooks> => {
       input: { tool: string; sessionID: string; callID: string },
       output: { title: string; output: string; metadata: any }
     ) => {
-      await voiceService.checkAndForwardMessages();
+      VoiceLogger.log('Tool execution completed, checking for voice messages');
+      await voiceService.checkAndForwardMessages(input.sessionID);
+    },
+
+    "tool.execute.before": async (
+      input: { tool: string; sessionID: string; callID: string },
+      output: { args: any }
+    ) => {
+      VoiceLogger.log('Tool execution started, checking for voice messages');
+      await voiceService.checkAndForwardMessages(input.sessionID);
     },
 
     // Monitor chat message events
-    "chat.message": async (
-      input: {},
-      output: { message: any; parts: any[] }
-    ) => {
-      await voiceService.checkAndForwardMessages();
-    },
+    // "chat.message": async (
+    //   input: {},
+    //   output: { message: any; parts: any[] }
+    // ) => {
+    //   VoiceLogger.log('Chat message event, checking for voice messages');
+    //   await voiceService.checkAndForwardMessages();
+    // },
 
-    // Provide voice-related tools
-    tool: {
-      voice_status: {
-        description: "Check the status of the voice interface connection and pending messages",
-        args: {},
-        async execute(args: any, context: ToolContext) {
-          const status = await voiceService.getStatus();
-          return `Voice Interface Status:
-- Connected: ${status.connected}
-- Pending Messages: ${status.pendingMessages}
-- Last Check: ${status.lastCheck}
-- Voice Interface URL: ${status.url}
-- Auto-forwarding: ${status.autoForwarding ? 'Enabled' : 'Disabled'}`;
-        }
-      },
-
-      voice_forward_now: {
-        description: "Immediately check for and forward any pending voice messages",
-        args: {},
-        async execute(args: any, context: ToolContext) {
-          const result = await voiceService.checkAndForwardMessages();
-          return `Voice message check completed:
-- Messages found: ${result.messagesFound}
-- Messages forwarded: ${result.messagesForwarded}
-- Errors: ${result.errors.length}
-${result.errors.length > 0 ? '\nErrors:\n' + result.errors.join('\n') : ''}`;
-        }
-      },
-
-      voice_configure: {
-        description: "Configure voice interface settings",
-        args: {
-          url: { type: "string", description: "Voice interface URL (optional)" },
-          autoForward: { type: "boolean", description: "Enable/disable auto-forwarding (optional)" },
-          pollInterval: { type: "number", description: "Poll interval in milliseconds (optional)" }
-        },
-        async execute(args: any, context: ToolContext) {
-          const updates = await voiceService.updateConfig({
-            voiceInterfaceUrl: args.url,
-            autoForwarding: args.autoForward,
-            pollInterval: args.pollInterval
-          });
-          
-          return `Voice interface configuration updated:
-${Object.entries(updates).map(([key, value]) => `- ${key}: ${value}`).join('\n')}`;
-        }
-      }
-    }
+    // Note: Custom tools disabled to avoid Zod schema validation errors
+    // The plugin focuses on automatic voice message forwarding via event hooks
+    // Manual tools can be added later when proper OpenCode tool() helper format is clarified
   };
 };
 

@@ -56,9 +56,9 @@ export function createBrowserInterface(
     
     // Auto-deliver immediately (only if no conversation tool is waiting)
     let delivered: any[] = [];
-    if (!voiceQueue.getStats().conversationWaiting) {
-      delivered = voiceQueue.deliverPendingInput();
-    }
+    // if (!voiceQueue.getStats().conversationWaiting) {
+    //   delivered = voiceQueue.deliverPendingInput();
+    // }
     
     res.json({
       success: true,
@@ -134,5 +134,20 @@ export function createBrowserInterface(
         error: 'Voice input not found or already delivered'
       });
     }
+  });
+
+  // API: Get and deliver all pending voice inputs (for plugin use)
+  app.post('/api/get-voice-input', (req, res) => {
+    const delivered = voiceQueue.deliverPendingInput();
+    
+    res.json({
+      success: true,
+      messages: delivered.map(input => ({
+        id: input.id,
+        text: input.text,
+        timestamp: input.timestamp,
+        status: input.status
+      }))
+    });
   });
 }

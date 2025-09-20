@@ -1,4 +1,5 @@
 import type { OpenCodeClient } from "./types";
+import { VoiceLogger } from "./voice-logger";
 
 /**
  * Voice Message Service
@@ -42,91 +43,70 @@ export class VoiceMessageService {
   private lastCheck = new Date();
   private autoForwarding = true;
 
+  get debugMode(): boolean {
+    return this.config.debug;
+  }
+
   constructor(client: OpenCodeClient, config: VoiceServiceConfig) {
     this.client = client;
     this.config = config;
     
-    if (this.config.debug) {
-      console.log('[Voice Service] Initialized with config:', this.config);
-    }
+    VoiceLogger.log('Voice Service initialized with config:', this.config);
   }
 
   /**
    * Check for pending voice messages and forward them to the current session
    */
-  async checkAndForwardMessages(): Promise<ForwardResult> {
+  async checkAndForwardMessages(sessionID: string): Promise<ForwardResult> {
     if (!this.autoForwarding) {
       return { messagesFound: 0, messagesForwarded: 0, errors: [] };
     }
 
     if (this.isPolling) {
-      // Avoid concurrent polling
       return { messagesFound: 0, messagesForwarded: 0, errors: ['Already polling'] };
     }
 
     this.isPolling = true;
     this.lastCheck = new Date();
     const errors: string[] = [];
-    let messagesFound = 0;
-    let messagesForwarded = 0;
 
     try {
-      // Check voice interface status
-      const status = await this.fetchVoiceStatus();
-      if (!status || status.pendingInputCount === 0) {
+      // Request pending messages and mark them as delivered in one call
+      const messages = await this.fetchAndDeliverMessages();
+      
+      VoiceLogger.log(`Got ${messages} voice messages`);
+
+      if (!messages || messages.length === 0) {
         return { messagesFound: 0, messagesForwarded: 0, errors: [] };
       }
 
-      messagesFound = status.pendingInputCount;
+      VoiceLogger.log(`Got ${messages.length} voice messages`);
 
-      if (this.config.debug) {
-        console.log(`[Voice Service] Found ${messagesFound} pending messages`);
-      }
+      // Sort messages by timestamp (earliest first)
+      const sortedMessages = messages.sort((a, b) => 
+        new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+      );
 
-      // Get pending messages
-      const messages = await this.fetchPendingMessages();
-      if (!messages || messages.length === 0) {
-        return { messagesFound, messagesForwarded: 0, errors: [] };
-      }
-
-      // Forward up to maxMessagesPerPoll messages
-      const messagesToForward = messages.slice(0, this.config.maxMessagesPerPoll);
+      // Combine all messages into single user message (plain text, no emoji prefix)
+      const combinedText = sortedMessages.map(msg => msg.text).join('\n');
       
-      for (const message of messagesToForward) {
-        try {
-          // Forward the message to OpenCode session
-          await this.forwardMessageToSession(message);
-          
-          // IMPORTANT: Consume the message from MCP so it's no longer available to converse() tool
-          await this.consumeMessage(message);
-          
-          messagesForwarded++;
-          
-          if (this.config.debug) {
-            console.log(`[Voice Service] Forwarded and consumed message: "${message.text}"`);
-          }
-        } catch (error) {
-          const errorMsg = `Failed to forward message "${message.text}": ${error}`;
-          errors.push(errorMsg);
-          
-          if (this.config.debug) {
-            console.error('[Voice Service]', errorMsg);
-          }
-        }
-      }
+      // Send as single user message to OpenCode
+      await this.forwardCombinedMessages(sessionID, combinedText);
+      
+      VoiceLogger.log(`Forwarded combined message: "${combinedText}"`);
+
+      return { messagesFound: messages.length, messagesForwarded: 1, errors: [] };
 
     } catch (error) {
       const errorMsg = `Voice service error: ${error}`;
       errors.push(errorMsg);
       
-      if (this.config.debug) {
-        console.error('[Voice Service]', errorMsg);
-      }
+      VoiceLogger.error(errorMsg);
+      
+      return { messagesFound: 0, messagesForwarded: 0, errors };
     } finally {
       this.isPolling = false;
     }
-
-    return { messagesFound, messagesForwarded, errors };
   }
 
   /**
@@ -134,9 +114,14 @@ export class VoiceMessageService {
    */
   async getStatus(): Promise<VoiceStatus> {
     try {
-      const status = await this.fetchVoiceStatus();
+      const response = await fetch(`${this.config.voiceInterfaceUrl}/api/status`);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      const status = await response.json();
+      
       return {
-        connected: !!status,
+        connected: true,
         pendingMessages: status?.pendingInputCount || 0,
         lastCheck: this.lastCheck.toISOString(),
         url: this.config.voiceInterfaceUrl,
@@ -178,86 +163,45 @@ export class VoiceMessageService {
   }
 
   /**
-   * Fetch voice interface status from MCP server
+   * Fetch and deliver all pending messages in one call
    */
-  private async fetchVoiceStatus(): Promise<any> {
-    const response = await fetch(`${this.config.voiceInterfaceUrl}/api/status`);
+  private async fetchAndDeliverMessages(): Promise<VoiceMessage[]> {
+    const response = await fetch(`${this.config.voiceInterfaceUrl}/api/get-voice-input`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      }
+    });
+
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
-    return await response.json();
+
+    const result = await response.json();
+    return result.messages || [];
   }
 
   /**
-   * Fetch pending messages from voice interface (without consuming them)
+   * Forward combined messages to the current OpenCode session
    */
-  private async fetchPendingMessages(): Promise<VoiceMessage[]> {
-    const status = await this.fetchVoiceStatus();
-    return status.recentInputs?.filter((msg: any) => msg.status === 'pending') || [];
-  }
-
-  /**
-   * Forward a voice message to the current OpenCode session
-   */
-  private async forwardMessageToSession(message: VoiceMessage): Promise<void> {
-    // Use OpenCode client to send message to current session
-    // This simulates a user message being added to the conversation
-    
+  private async forwardCombinedMessages(sessionID: string, combinedText: string): Promise<void> {
     try {
-      // Create a user message that appears in the chat
-      const userMessage = `🎤 Voice: ${message.text}`;
-      
-      // Use the OpenCode client to add the message to the current session
-      // Note: This is a simplified approach - the actual API might differ
-      await this.client.messages.create({
-        content: userMessage,
-        role: 'user',
-        metadata: {
-          source: 'voice-interface',
-          originalMessageId: message.id,
-          timestamp: message.timestamp
+      await this.client.session.prompt({
+        path: {
+          id: sessionID
+        },
+        body: {
+          parts: [
+            {
+              type: 'text',
+              text: combinedText
+            }
+          ]
         }
       });
       
     } catch (error) {
       throw new Error(`Failed to forward to session: ${error}`);
-    }
-  }
-
-  /**
-   * Consume/deliver a voice message so it's no longer available to converse() tool
-   * This calls the MCP voice interface to mark the message as delivered
-   */
-  private async consumeMessage(message: VoiceMessage): Promise<void> {
-    try {
-      // Call the deliver-input API endpoint to consume the specific message
-      // This marks it as delivered so it's no longer available to converse() tool
-      const response = await fetch(`${this.config.voiceInterfaceUrl}/api/deliver-input`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          inputId: message.id
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const result = await response.json();
-      
-      if (!result.success) {
-        throw new Error(result.error || 'Failed to consume message');
-      }
-      
-      if (this.config.debug) {
-        console.log(`[Voice Service] Message ${message.id} consumed:`, result);
-      }
-      
-    } catch (error) {
-      throw new Error(`Failed to consume message: ${error}`);
     }
   }
 }
