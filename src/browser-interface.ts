@@ -150,4 +150,21 @@ export function createBrowserInterface(
       }))
     });
   });
+
+  // API: Test endpoint to trigger speech (for testing pause functionality)
+  app.post('/api/test-speak', (req, res) => {
+    const { text } = req.body;
+    
+    if (!text || typeof text !== 'string') {
+      return res.status(400).json({ error: 'text is required and must be a string' });
+    }
+    
+    // Broadcast TTS to connected clients
+    voiceQueue.broadcastTTS(text);
+    
+    res.json({
+      success: true,
+      message: 'Speech request sent to browser'
+    });
+  });
 }

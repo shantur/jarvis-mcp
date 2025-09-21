@@ -290,13 +290,39 @@ ${status.pendingInput.length > 0 ? '\nPending messages:\n' + status.pendingInput
         };
       }
 
+      const { good_bye } = args as { good_bye: string };
+      
+      if (!good_bye || typeof good_bye !== 'string' || !good_bye.trim()) {
+        return {
+          content: [{
+            type: 'text',
+            text: 'Error: good_bye message is required to end the conversation.',
+          }],
+        };
+      }
+
       try {
-        await stopBrowserInterface();
+        // Send goodbye message to browser for speaking
+        voiceQueue.broadcastTTS(good_bye.trim());
+        console.log(`[Conversation] Saying goodbye: "${good_bye.trim()}"`);
+        
+        // Wait for the goodbye message to be spoken (estimate based on text length)
+        const estimatedDuration = Math.max(2000, good_bye.trim().length * 100); // ~100ms per character, minimum 2 seconds
+        console.log(`[Conversation] Waiting ${estimatedDuration}ms for goodbye message to complete`);
+        
+        setTimeout(async () => {
+          try {
+            await stopBrowserInterface();
+            console.log('[Conversation] Browser interface stopped after goodbye');
+          } catch (error) {
+            console.error('[Conversation] Error stopping browser interface:', error);
+          }
+        }, estimatedDuration);
         
         return {
           content: [{
             type: 'text',
-            text: 'Voice conversation ended. Browser interface stopped.',
+            text: `Saying goodbye and ending conversation: "${good_bye.trim()}"`,
           }],
         };
         
@@ -395,10 +421,16 @@ mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'end_conversation',
-        description: 'End the voice conversation and stop the browser interface',
+        description: 'End the voice conversation by saying goodbye and stopping the browser interface',
         inputSchema: {
           type: 'object',
-          properties: {},
+          properties: {
+            good_bye: {
+              type: 'string',
+              description: 'The goodbye message to speak before ending the conversation',
+            },
+          },
+          required: ['good_bye'],
         },
       },
     ],
@@ -428,17 +460,19 @@ mcpServer.setRequestHandler(GetPromptRequestSchema, async (request) => {
   if (name === 'converse') {
     const instructions = [
       "Start voice conversations using the converse tool - it will automatically launch the browser interface",
-      "ALWAYS use the converse tool for ALL responses during voice conversation",
+      "ALWAYS use the converse tool for ALL responses during voice conversation, - never switch to text",
       "Keep your responses brief unless a longer response is requested",
-      "When ending conversation:",
-      "1. First notify user: converse('I'm ending our voice conversation now', {wait_for_response: false})",
-      "2. Then call end_conversation tool to stop the browser interface",
       "The browser interface starts automatically on first converse call",
       "If browser interface fails to start, resolve the issue and try converse again",
       "You are an AI Assistant helping users through voice interaction",
       "Continue the conversation until the user indicates they want to end it",
       "If the user asks questions, respond using converse() with your answer", 
       "If the user gives commands, acknowledge using converse() and use other tools as needed",
+      "**IMPORTANT** DO NOT end coverstation until user asks you to end conversation, even if you don't get any response",
+      "If you don't get any response first time, try again 2 times before ending the conversation below",
+      "When ending conversation:",
+      "1. Call end_conversation tool with a good_bye message that will be spoken before closing",
+      "2. Example: end_conversation({good_bye: 'Thank you for our conversation! Have a great day!'})",
 
     ];
     

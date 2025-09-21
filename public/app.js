@@ -25,6 +25,8 @@ class VoiceInterfaceClient {
         this.voiceSelect = document.getElementById('voiceSelect');
         this.alwaysOnToggle = document.getElementById('alwaysOnToggle');
         this.alwaysOnIndicator = document.getElementById('alwaysOnIndicator');
+        this.pauseDuringSpeechToggle = document.getElementById('pauseDuringSpeechToggle');
+        this.stopAiOnUserSpeechToggle = document.getElementById('stopAiOnUserSpeechToggle');
         
         // TTS state
         this.isSpeaking = false;
@@ -38,10 +40,19 @@ class VoiceInterfaceClient {
         this.alwaysOnMode = false;
         this.restartTimeout = null;
         
+        // Pause during speech state (default: true to prevent echo/feedback)
+        this.pauseDuringSpeech = true;
+        
+        // Stop AI when user speaks (default: true for natural conversation)
+        this.stopAiOnUserSpeech = true;
+        
         // Speech session tracking
         this.currentSessionTranscript = '';
         this.speechTimeout = null;
         this.speechTimeoutDuration = 2000; // 2 seconds of silence before sending
+        
+        // AI speech display timeout
+        this.aiSpeechHideTimeout = null;
         
         this.initializeSpeechRecognition();
         this.initializeEventSource();
@@ -116,11 +127,14 @@ class VoiceInterfaceClient {
                 this.currentSessionTranscript = '';
             }
             
-            // Auto-restart if in always-on mode and not speaking
-            if (this.alwaysOnMode && !this.isSpeaking) {
-                console.log('[Speech] Auto-restarting recognition in 100ms');
+            // Auto-restart if in always-on mode OR if pause is disabled and we should be listening
+            if (this.alwaysOnMode || (!this.pauseDuringSpeech && this.wasListeningBeforeTTS)) {
+                const reason = this.alwaysOnMode ? 'always-on mode' : 'pause disabled during AI speech';
+                console.log(`[Speech] Auto-restarting recognition in 100ms (${reason})`);
                 this.restartTimeout = setTimeout(() => {
-                    this.startListening();
+                    if (!this.isListening && (this.alwaysOnMode || (!this.pauseDuringSpeech && this.wasListeningBeforeTTS))) {
+                        this.startListening();
+                    }
                 }, 100);
             }
         };
@@ -152,6 +166,15 @@ class VoiceInterfaceClient {
                 displayTranscript: displayTranscript
             });
             
+            // If AI is speaking and user starts talking, stop AI speech (natural conversation)
+            if (this.isSpeaking && !this.pauseDuringSpeech && this.stopAiOnUserSpeech && displayTranscript.trim()) {
+                console.log('[Speech] 🔇 User started speaking - stopping AI speech for natural conversation');
+                speechSynthesis.cancel();
+                this.isSpeaking = false;
+                this.updateSpeakingStatus(false);
+                this.hideAISpeech();
+            }
+            
             // Validate and display transcript
             if (displayTranscript && displayTranscript.trim() !== '') {
                 // Store final transcript for sending
@@ -175,11 +198,12 @@ class VoiceInterfaceClient {
             this.isListening = false;
             this.updateVoiceUI();
             
-            // Handle errors in always-on mode
-            if (this.alwaysOnMode && !this.isSpeaking) {
-                console.log('[Speech] Attempting to restart recognition after error in 100ms');
+            // Handle errors in always-on mode or when pause is disabled
+            if (this.alwaysOnMode || (!this.pauseDuringSpeech && this.wasListeningBeforeTTS)) {
+                const reason = this.alwaysOnMode ? 'always-on mode' : 'pause disabled during AI speech';
+                console.log(`[Speech] Attempting to restart recognition after error in 100ms (${reason})`);
                 this.restartTimeout = setTimeout(() => {
-                    if (this.alwaysOnMode && !this.isListening && !this.isSpeaking) {
+                    if (!this.isListening && (this.alwaysOnMode || (!this.pauseDuringSpeech && this.wasListeningBeforeTTS))) {
                         this.startListening();
                     }
                 }, 100);
@@ -270,6 +294,16 @@ class VoiceInterfaceClient {
         // Always-on toggle event listener
         this.alwaysOnToggle.addEventListener('click', () => {
             this.toggleAlwaysOnMode();
+        });
+        
+        // Pause during speech toggle event listener
+        this.pauseDuringSpeechToggle.addEventListener('click', () => {
+            this.togglePauseDuringSpeech();
+        });
+        
+        // Stop AI on user speech toggle event listener
+        this.stopAiOnUserSpeechToggle.addEventListener('click', () => {
+            this.toggleStopAiOnUserSpeech();
         });
     }
     
@@ -441,17 +475,89 @@ class VoiceInterfaceClient {
         this.updateVoiceUI();
     }
     
+    togglePauseDuringSpeech() {
+        this.pauseDuringSpeech = !this.pauseDuringSpeech;
+        console.log('[Speech] Pause during speech:', this.pauseDuringSpeech ? 'enabled' : 'disabled');
+        
+        // Update UI
+        this.updatePauseDuringSpeechUI();
+        
+        // Save preference
+        this.saveUserPreferences();
+    }
+    
+    updatePauseDuringSpeechUI() {
+        this.pauseDuringSpeechToggle.classList.toggle('active', this.pauseDuringSpeech);
+    }
+    
+    toggleStopAiOnUserSpeech() {
+        this.stopAiOnUserSpeech = !this.stopAiOnUserSpeech;
+        console.log('[Speech] Stop AI on user speech:', this.stopAiOnUserSpeech ? 'enabled' : 'disabled');
+        
+        // Update UI
+        this.updateStopAiOnUserSpeechUI();
+        
+        // Save preference
+        this.saveUserPreferences();
+    }
+    
+    updateStopAiOnUserSpeechUI() {
+        this.stopAiOnUserSpeechToggle.classList.toggle('active', this.stopAiOnUserSpeech);
+    }
+    
+    ensureListeningActive() {
+        // When pause is disabled, aggressively ensure recognition stays active
+        console.log('[Speech] Ensuring recognition stays active during AI speech');
+        
+        // Check if recognition is actually working
+        setTimeout(() => {
+            if (!this.isListening && (this.alwaysOnMode || this.wasListeningBeforeTTS)) {
+                console.log('[Speech] Recognition stopped during AI speech - restarting it');
+                this.startListening();
+            }
+        }, 1000); // Check after 1 second
+        
+        // Also check again after 3 seconds  
+        setTimeout(() => {
+            if (!this.isListening && (this.alwaysOnMode || this.wasListeningBeforeTTS)) {
+                console.log('[Speech] Recognition still stopped - restarting again');
+                this.startListening();
+            }
+        }, 3000);
+    }
+    
     speakText(text) {
         if ('speechSynthesis' in window) {
+            // Stop any currently playing speech to allow immediate interruption
+            if (this.isSpeaking) {
+                console.log('[TTS] 🔄 INTERRUPTING current speech to start new one');
+                console.log('[TTS] Previous text:', this.currentSpeechText?.substring(0, 50) + '...');
+                console.log('[TTS] New text:', text.substring(0, 50) + '...');
+                speechSynthesis.cancel();
+                this.isSpeaking = false;
+                
+                // Show brief interruption indicator
+                this.showInterruptionIndicator();
+            }
+            
             // Store the current speech text and show it
             this.currentSpeechText = text;
             this.showAISpeech(text);
             
-            // Stop listening while speaking to avoid echo/feedback
-            this.wasListeningBeforeTTS = this.isListening;
-            if (this.isListening) {
+            // Only store listening state if we weren't already speaking
+            // This preserves the original listening state across multiple interruptions
+            if (!this.wasListeningBeforeTTS) {
+                this.wasListeningBeforeTTS = this.isListening;
+            }
+            
+            // Stop listening while speaking to avoid echo/feedback (if enabled)
+            if (this.isListening && this.pauseDuringSpeech) {
                 console.log('[TTS] Pausing listening during speech');
                 this.recognition.stop();
+            } else if (this.isListening && !this.pauseDuringSpeech) {
+                console.log('[TTS] Keeping listening active during speech (pause disabled)');
+                // Ensure recognition stays active - restart it if needed
+                this.ensureListeningActive();
             }
             
             const utterance = new SpeechSynthesisUtterance(text);
@@ -480,15 +586,39 @@ class VoiceInterfaceClient {
                 this.updateSpeakingStatus(false);
                 this.hideAISpeech();
                 
-                // Resume listening if it was active before TTS or if in always-on mode
-                if ((this.wasListeningBeforeTTS || this.alwaysOnMode) && !this.isListening) {
-                    console.log('[TTS] Resuming listening after speech');
-                    setTimeout(() => {
-                        if (!this.isListening && (this.wasListeningBeforeTTS || this.alwaysOnMode)) {
-                            this.startListening();
-                        }
-                    }, 500); // Small delay to avoid immediate pickup of TTS tail
+                // Resume listening based on pause setting and mode
+                console.log('[TTS] Speech ended. Checking listening state:', {
+                    isListening: this.isListening,
+                    alwaysOnMode: this.alwaysOnMode,
+                    pauseDuringSpeech: this.pauseDuringSpeech,
+                    wasListeningBeforeTTS: this.wasListeningBeforeTTS
+                });
+                
+                if (!this.isListening) {
+                    if (this.pauseDuringSpeech && (this.wasListeningBeforeTTS || this.alwaysOnMode)) {
+                        // If pausing was enabled, resume if we were listening before or in always-on mode
+                        console.log('[TTS] Resuming listening after speech (pause was enabled)');
+                        setTimeout(() => {
+                            if (!this.isListening && (this.wasListeningBeforeTTS || this.alwaysOnMode)) {
+                                this.startListening();
+                            }
+                        }, 500);
+                    } else if (!this.pauseDuringSpeech && this.alwaysOnMode) {
+                        // If pausing was disabled but we're in always-on mode, restart if somehow stopped
+                        console.log('[TTS] Restarting always-on listening after speech (pause was disabled)');
+                        setTimeout(() => {
+                            if (!this.isListening && this.alwaysOnMode) {
+                                this.startListening();
+                            }
+                        }, 500);
+                    }
+                } else if (this.alwaysOnMode && !this.pauseDuringSpeech) {
+                    // If we're still listening, that's good! But make sure it stays active
+                    console.log('[TTS] Recognition still active during always-on with pause disabled - good!');
                 }
+                
+                // Reset the listening state tracker
+                this.wasListeningBeforeTTS = false;
             };
             
             utterance.onerror = (event) => {
@@ -498,14 +628,26 @@ class VoiceInterfaceClient {
                 this.hideAISpeech();
                 
                 // Resume listening on error too
-                if ((this.wasListeningBeforeTTS || this.alwaysOnMode) && !this.isListening) {
-                    console.log('[TTS] Resuming listening after TTS error');
-                    setTimeout(() => {
-                        if (!this.isListening) {
-                            this.recognition.start();
-                        }
-                    }, 500);
+                if (!this.isListening) {
+                    if (this.pauseDuringSpeech && (this.wasListeningBeforeTTS || this.alwaysOnMode)) {
+                        console.log('[TTS] Resuming listening after TTS error (pause was enabled)');
+                        setTimeout(() => {
+                            if (!this.isListening) {
+                                this.startListening();
+                            }
+                        }, 500);
+                    } else if (!this.pauseDuringSpeech && this.alwaysOnMode) {
+                        console.log('[TTS] Restarting always-on listening after TTS error (pause was disabled)');
+                        setTimeout(() => {
+                            if (!this.isListening && this.alwaysOnMode) {
+                                this.startListening();
+                            }
+                        }, 500);
+                    }
                 }
+                
+                // Reset the listening state tracker
+                this.wasListeningBeforeTTS = false;
             };
             
             speechSynthesis.speak(utterance);
@@ -515,7 +657,8 @@ class VoiceInterfaceClient {
     }
     
     updateVoiceUI() {
-        if (this.isSpeaking) {
+        // If pause during speech is disabled and we're still listening, prioritize listening state
+        if (this.isSpeaking && this.pauseDuringSpeech) {
             this.voiceBtn.classList.remove('listening');
             this.voiceBtnText.textContent = 'Speaking...';
             this.voiceBtn.disabled = true;
@@ -547,13 +690,13 @@ class VoiceInterfaceClient {
                 this.voiceText.textContent = 'Voice Inactive';
                 this.speechDisplay.textContent = 'Start speaking and your words will appear here...';
                 this.speechDisplay.classList.remove('active');
-                this.voiceBtn.disabled = this.isSpeaking ? true : !this.isConnected;
+                this.voiceBtn.disabled = (this.isSpeaking && this.pauseDuringSpeech) ? true : !this.isConnected;
                 this.voiceStatus.classList.remove('active');
             }
         }
         
-        // Update test voice button
-        this.testVoiceBtn.disabled = this.isSpeaking;
+        // Update test voice button - only disable if speaking AND pausing is enabled
+        this.testVoiceBtn.disabled = this.isSpeaking && this.pauseDuringSpeech;
     }
     
     updateSpeakingStatus(speaking) {
@@ -561,22 +704,69 @@ class VoiceInterfaceClient {
         this.updateVoiceUI();
         
         if (speaking) {
-            this.speechDisplay.textContent = 'AI Assistant is speaking...';
-            this.speechDisplay.classList.add('active');
+            // Only override speech display if pausing is enabled or not listening
+            if (this.pauseDuringSpeech || !this.isListening) {
+                this.speechDisplay.textContent = 'AI Assistant is speaking...';
+                this.speechDisplay.classList.add('active');
+            }
+        } else {
+            // When speaking ends, restore speech display state if we were showing AI speech
+            if (this.speechDisplay.textContent === 'AI Assistant is speaking...') {
+                if (this.isListening) {
+                    this.speechDisplay.textContent = 'Listening...';
+                } else {
+                    this.speechDisplay.textContent = 'Start speaking and your words will appear here...';
+                    this.speechDisplay.classList.remove('active');
+                }
+            }
         }
     }
     
     showAISpeech(text) {
+        // Cancel any pending hide timeout when showing new speech
+        if (this.aiSpeechHideTimeout) {
+            clearTimeout(this.aiSpeechHideTimeout);
+            this.aiSpeechHideTimeout = null;
+        }
+        
         this.aiSpeechText.textContent = text;
         this.aiSpeechDisplay.style.display = 'block';
         console.log('[UI] Showing AI speech:', text);
+        
+        // Add a brief flash effect when speech is interrupted
+        if (this.isSpeaking) {
+            this.aiSpeechDisplay.style.animation = 'none';
+            // Force reflow
+            this.aiSpeechDisplay.offsetHeight;
+            this.aiSpeechDisplay.style.animation = 'fadeIn 0.3s ease-in';
+        }
+    }
+    
+    showInterruptionIndicator() {
+        // Briefly show an interruption indicator
+        const header = this.aiSpeechDisplay.querySelector('.ai-speech-header');
+        if (header) {
+            const originalText = header.textContent;
+            header.textContent = '🔄 Speech Interrupted - New message:';
+            setTimeout(() => {
+                header.textContent = originalText;
+            }, 1500);
+        }
     }
     
     hideAISpeech() {
-        setTimeout(() => {
-            this.aiSpeechDisplay.style.display = 'none';
-            this.aiSpeechText.textContent = '';
-            console.log('[UI] Hiding AI speech display');
+        // Clear any pending hide timeout
+        if (this.aiSpeechHideTimeout) {
+            clearTimeout(this.aiSpeechHideTimeout);
+        }
+        
+        this.aiSpeechHideTimeout = setTimeout(() => {
+            // Only hide if we're not currently speaking (prevents hiding during interruptions)
+            if (!this.isSpeaking) {
+                this.aiSpeechDisplay.style.display = 'none';
+                this.aiSpeechText.textContent = '';
+                console.log('[UI] Hiding AI speech display');
+            }
         }, 1000); // Keep visible for 1 second after speech ends
     }
     
@@ -655,6 +845,20 @@ class VoiceInterfaceClient {
                     this.updateAlwaysOnUI();
                     console.log('[Preferences] Loaded always-on mode:', prefs.alwaysOnMode);
                 }
+                
+                // Load pause during speech preference
+                if (prefs.pauseDuringSpeech !== undefined) {
+                    this.pauseDuringSpeech = prefs.pauseDuringSpeech;
+                    this.updatePauseDuringSpeechUI();
+                    console.log('[Preferences] Loaded pause during speech:', prefs.pauseDuringSpeech);
+                }
+                
+                // Load stop AI on user speech preference
+                if (prefs.stopAiOnUserSpeech !== undefined) {
+                    this.stopAiOnUserSpeech = prefs.stopAiOnUserSpeech;
+                    this.updateStopAiOnUserSpeechUI();
+                    console.log('[Preferences] Loaded stop AI on user speech:', prefs.stopAiOnUserSpeech);
+                }
             }
         } catch (error) {
             console.error('[Preferences] Failed to load user preferences:', error);
@@ -682,6 +886,8 @@ class VoiceInterfaceClient {
                 speechSpeed: parseFloat(this.speedSlider.value),
                 selectedVoiceURI: this.selectedVoice ? this.selectedVoice.voiceURI : null,
                 alwaysOnMode: this.alwaysOnMode,
+                pauseDuringSpeech: this.pauseDuringSpeech,
+                stopAiOnUserSpeech: this.stopAiOnUserSpeech,
             };
             
             localStorage.setItem('mcpVoicePreferences', JSON.stringify(prefs));

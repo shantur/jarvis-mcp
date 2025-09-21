@@ -523,13 +523,13 @@
             opacity: 1;
         }
 
-        .always-on-control {
+        .always-on-control, .pause-during-speech-control, .stop-ai-on-user-speech-control {
             display: flex;
             align-items: center;
             gap: 12px;
         }
 
-        .always-on-control label {
+        .always-on-control label, .pause-during-speech-control label, .stop-ai-on-user-speech-control label {
             font-weight: 500;
             color: #333;
             cursor: pointer;
@@ -547,14 +547,14 @@
         }
 
         @media (max-width: 768px) {
-            .always-on-control {
+            .always-on-control, .pause-during-speech-control, .stop-ai-on-user-speech-control {
                 flex-direction: column;
                 align-items: center;
                 gap: 8px;
                 text-align: center;
             }
             
-            .always-on-control label {
+            .always-on-control label, .pause-during-speech-control label, .stop-ai-on-user-speech-control label {
                 font-size: 14px;
                 order: 1;
             }
@@ -575,7 +575,7 @@
                 transform: translateX(30px) !important;
             }
             
-            .always-on-indicator {
+            .always-on-indicator, .setting-description {
                 order: 3;
                 font-size: 12px;
             }
@@ -607,6 +607,12 @@
             font-weight: 600;
             font-size: 12px;
             animation: pulse 1.5s infinite;
+        }
+
+        .setting-description {
+            color: #6c757d;
+            font-size: 12px;
+            font-style: italic;
         }
 
         .ai-speech-display {
@@ -751,6 +757,16 @@
                 <div class="toggle-switch" id="alwaysOnToggle"></div>
                 <span class="always-on-indicator" id="alwaysOnIndicator" style="display: none;">🔴 ALWAYS LISTENING</span>
             </div>
+            <div class="pause-during-speech-control">
+                <label for="pauseDuringSpeechToggle">Pause Listening During AI Speech:</label>
+                <div class="toggle-switch active" id="pauseDuringSpeechToggle"></div>
+                <span class="setting-description">Prevents echo and feedback</span>
+            </div>
+            <div class="stop-ai-on-user-speech-control">
+                <label for="stopAiOnUserSpeechToggle">Stop AI When User Speaks:</label>
+                <div class="toggle-switch active" id="stopAiOnUserSpeechToggle"></div>
+                <span class="setting-description">Natural conversation interruption</span>
+            </div>
             <div class="speed-control">
                 <label for="speedSlider">Speech Speed:</label>
                 <input type="range" id="speedSlider" min="0.5" max="2.0" step="0.1" value="1.0">
@@ -796,6 +812,6 @@
         </div>
     </div>
 
-    <script src="app.js?v=4&fix=speech"></script>
+    <script src="app.js?v=13&fix=aggressive-recognition-restart"></script>
 </body>
 </html>

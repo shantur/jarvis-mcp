@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Pause During Speech Feature</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-section { border: 1px solid #ccc; padding: 20px; margin: 10px 0; }
+        .status { padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .status.info { background: #e3f2fd; }
+        .status.success { background: #e8f5e8; }
+        .status.warning { background: #fff3cd; }
+    </style>
+</head>
+<body>
+    <h1>Test: Pause During Speech Feature</h1>
+    
+    <div class="test-section">
+        <h2>Current Settings</h2>
+        <div id="settingsDisplay"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>Speech Recognition State Test</h2>
+        <button onclick="testPauseLogic()">Test Pause Logic</button>
+        <div id="testResults"></div>
+    </div>
+    
+    <script>
+        // Mock the VoiceInterfaceClient structure for testing
+        class TestVoiceClient {
+            constructor() {
+                this.isListening = false;
+                this.isSpeaking = false;
+                this.pauseDuringSpeech = true; // Default enabled
+                this.wasListeningBeforeTTS = false;
+                this.alwaysOnMode = false;
+            }
+            
+            // Mock the key logic from speakText function
+            startSpeaking(text) {
+                console.log('[Test] Starting to speak:', text);
+                
+                // Mock the pause logic
+                this.wasListeningBeforeTTS = this.isListening;
+                if (this.isListening && this.pauseDuringSpeech) {
+                    console.log('[Test] Pausing listening during speech');
+                    this.isListening = false; // Simulate recognition.stop()
+                    return "PAUSED";
+                } else if (this.isListening && !this.pauseDuringSpeech) {
+                    console.log('[Test] Continuing listening during speech');
+                    return "CONTINUED";
+                } else {
+                    console.log('[Test] Not listening, no action needed');
+                    return "NO_ACTION";
+                }
+            }
+            
+            // Mock the resume logic
+            finishSpeaking() {
+                console.log('[Test] Finished speaking');
+                
+                // Mock the resume logic
+                if (this.pauseDuringSpeech && (this.wasListeningBeforeTTS || this.alwaysOnMode) && !this.isListening) {
+                    console.log('[Test] Resuming listening after speech');
+                    this.isListening = true; // Simulate startListening()
+                    return "RESUMED";
+                } else {
+                    console.log('[Test] Not resuming listening');
+                    return "NO_RESUME";
+                }
+            }
+        }
+        
+        const testClient = new TestVoiceClient();
+        
+        function updateSettingsDisplay() {
+            const display = document.getElementById('settingsDisplay');
+            display.innerHTML = `
+                <div class="status info">
+                    <strong>Pause During Speech:</strong> ${testClient.pauseDuringSpeech ? 'Enabled' : 'Disabled'}<br>
+                    <strong>Always On Mode:</strong> ${testClient.alwaysOnMode ? 'Enabled' : 'Disabled'}<br>
+                    <strong>Currently Listening:</strong> ${testClient.isListening ? 'Yes' : 'No'}<br>
+                    <strong>Currently Speaking:</strong> ${testClient.isSpeaking ? 'Yes' : 'No'}
+                </div>
+                <button onclick="togglePause()">Toggle Pause During Speech</button>
+                <button onclick="toggleAlwaysOn()">Toggle Always On</button>
+                <button onclick="toggleListening()">Toggle Listening</button>
+            `;
+        }
+        
+        function togglePause() {
+            testClient.pauseDuringSpeech = !testClient.pauseDuringSpeech;
+            updateSettingsDisplay();
+        }
+        
+        function toggleAlwaysOn() {
+            testClient.alwaysOnMode = !testClient.alwaysOnMode;
+            updateSettingsDisplay();
+        }
+        
+        function toggleListening() {
+            testClient.isListening = !testClient.isListening;
+            updateSettingsDisplay();
+        }
+        
+        function testPauseLogic() {
+            const results = document.getElementById('testResults');
+            let testResults = '<h3>Test Results:</h3>';
+            
+            // Test 1: Pause enabled, listening active
+            testClient.pauseDuringSpeech = true;
+            testClient.isListening = true;
+            testClient.alwaysOnMode = false;
+            const result1 = testClient.startSpeaking("Test message");
+            const resume1 = testClient.finishSpeaking();
+            testResults += `<div class="status ${result1 === 'PAUSED' && resume1 === 'RESUMED' ? 'success' : 'warning'}">
+                <strong>Test 1:</strong> Pause=true, Listening=true → ${result1}, Resume → ${resume1}
+            </div>`;
+            
+            // Test 2: Pause disabled, listening active  
+            testClient.pauseDuringSpeech = false;
+            testClient.isListening = true;
+            testClient.alwaysOnMode = false;
+            const result2 = testClient.startSpeaking("Test message");
+            const resume2 = testClient.finishSpeaking();
+            testResults += `<div class="status ${result2 === 'CONTINUED' && resume2 === 'NO_RESUME' ? 'success' : 'warning'}">
+                <strong>Test 2:</strong> Pause=false, Listening=true → ${result2}, Resume → ${resume2}
+            </div>`;
+            
+            // Test 3: Pause enabled, not listening
+            testClient.pauseDuringSpeech = true;
+            testClient.isListening = false;
+            testClient.alwaysOnMode = false;
+            const result3 = testClient.startSpeaking("Test message");
+            const resume3 = testClient.finishSpeaking();
+            testResults += `<div class="status ${result3 === 'NO_ACTION' && resume3 === 'NO_RESUME' ? 'success' : 'warning'}">
+                <strong>Test 3:</strong> Pause=true, Listening=false → ${result3}, Resume → ${resume3}
+            </div>`;
+            
+            // Test 4: Always-on mode with pause disabled
+            testClient.pauseDuringSpeech = false;
+            testClient.isListening = true;
+            testClient.alwaysOnMode = true;
+            const result4 = testClient.startSpeaking("Test message");
+            const resume4 = testClient.finishSpeaking();
+            testResults += `<div class="status ${result4 === 'CONTINUED' && resume4 === 'NO_RESUME' ? 'success' : 'warning'}">
+                <strong>Test 4:</strong> Pause=false, AlwaysOn=true, Listening=true → ${result4}, Resume → ${resume4}
+            </div>`;
+            
+            results.innerHTML = testResults;
+            updateSettingsDisplay();
+        }
+        
+        // Initialize display
+        updateSettingsDisplay();
+    </script>
+</body>
+</html>
