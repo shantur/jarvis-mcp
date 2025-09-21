@@ -250,7 +250,8 @@ function installOpencodePlugin(useLocal: boolean) {
     console.log('5. Use voice tools: voice_status(), voice_forward_now(), voice_configure()');
     console.log('');
     console.log('Environment variables (optional):');
-    console.log('  VOICE_INTERFACE_URL=http://localhost:5113');
+    console.log('  MCP_VOICE_INTERFACE_PORT=5114');
+    console.log('  VOICE_INTERFACE_URL=https://localhost:5114');
     console.log('  VOICE_POLL_INTERVAL=2000');
     console.log('  VOICE_MAX_MESSAGES=5');
     console.log('  VOICE_DEBUG=true');

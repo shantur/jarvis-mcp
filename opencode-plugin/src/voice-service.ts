@@ -1,5 +1,6 @@
 import type { OpenCodeClient } from "./types";
 import { VoiceLogger } from "./voice-logger";
+import https from 'https';
 
 /**
  * Voice Message Service
@@ -42,6 +43,7 @@ export class VoiceMessageService {
   private isPolling = false;
   private lastCheck = new Date();
   private autoForwarding = true;
+  private httpsAgent?: https.Agent;
 
   get debugMode(): boolean {
     return this.config.debug;
@@ -51,7 +53,45 @@ export class VoiceMessageService {
     this.client = client;
     this.config = config;
     
+    // Configure HTTPS agent to ignore self-signed certificates for HTTPS
+    if (this.config.voiceInterfaceUrl.startsWith('https:')) {
+      // Create custom HTTPS agent that ignores certificate validation
+      // This is safe for localhost connections with self-signed certificates
+      this.httpsAgent = new https.Agent({
+        rejectUnauthorized: false
+      });
+      
+      VoiceLogger.log('Configured custom HTTPS agent to ignore self-signed certificates');
+    }
+    
     VoiceLogger.log('Voice Service initialized with config:', this.config);
+  }
+
+  /**
+   * Custom fetch wrapper that handles HTTPS with ignored certificates
+   */
+  private async customFetch(url: string, options: RequestInit = {}): Promise<Response> {
+    if (this.config.voiceInterfaceUrl.startsWith('https:') && this.httpsAgent) {
+      // For HTTPS with custom agent, we need to use a different approach
+      // Since Node.js fetch doesn't directly support custom agents, we'll use the global setting temporarily
+      const originalSetting = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+      process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+      
+      try {
+        const response = await fetch(url, options);
+        return response;
+      } finally {
+        // Restore original setting
+        if (originalSetting !== undefined) {
+          process.env.NODE_TLS_REJECT_UNAUTHORIZED = originalSetting;
+        } else {
+          delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+        }
+      }
+    } else {
+      // For HTTP or if no custom agent needed, use normal fetch
+      return fetch(url, options);
+    }
   }
 
   /**
@@ -114,7 +154,7 @@ export class VoiceMessageService {
    */
   async getStatus(): Promise<VoiceStatus> {
     try {
-      const response = await fetch(`${this.config.voiceInterfaceUrl}/api/status`);
+      const response = await this.customFetch(`${this.config.voiceInterfaceUrl}/api/status`);
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
@@ -166,7 +206,7 @@ export class VoiceMessageService {
    * Fetch and deliver all pending messages in one call
    */
   private async fetchAndDeliverMessages(): Promise<VoiceMessage[]> {
-    const response = await fetch(`${this.config.voiceInterfaceUrl}/api/get-voice-input`, {
+    const response = await this.customFetch(`${this.config.voiceInterfaceUrl}/api/get-voice-input`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

@@ -8,11 +8,15 @@
     "mcp-voice-interface": "dist/cli.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "npm run build:plugin && npm run build:main && npm run postbuild",
+    "build:main": "tsc",
+    "build:plugin": "cd opencode-plugin && npm run build && cd .. && node create-bundle.cjs",
+    "build:plugin-only": "cd opencode-plugin && npm run build",
+    "postbuild": "chmod +x dist/cli.js",
     "dev": "tsc --watch",
     "start": "node dist/cli.js",
     "mcp": "node dist/index.js",
-    "clean": "rm -rf dist",
+    "clean": "rm -rf dist && rm -rf opencode-plugin/dist",
     "prepublishOnly": "npm run build"
   },
   "keywords": [

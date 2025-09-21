@@ -26,9 +26,9 @@ This OpenCode plugin integrates with the MCP Voice Interface to enable voice mes
 
 The plugin can be configured via environment variables:
 
-- `VOICE_INTERFACE_URL`: URL of the MCP Voice Interface (default: `http://localhost:5113`)
-  - Uses HTTP by default for reliability (avoids SSL certificate issues in background operations)
-  - Can be changed to HTTPS if needed: `https://localhost:5114`
+- `MCP_VOICE_INTERFACE_PORT`: Port number for the voice interface (default: `5114`)
+- `VOICE_INTERFACE_URL`: URL of the MCP Voice Interface (default: `https://localhost:5114`)
+  - Uses HTTPS by default with automatic self-signed certificate handling
 - `VOICE_POLL_INTERVAL`: Polling interval in milliseconds (default: `2000`)
 - `VOICE_MAX_MESSAGES`: Maximum messages to process per poll (default: `5`)
 - `VOICE_DEBUG`: Enable debug logging (default: `false`)

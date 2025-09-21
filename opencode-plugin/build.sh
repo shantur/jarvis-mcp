@@ -37,6 +37,7 @@ if [ $? -eq 0 ]; then
     echo ""
     echo "🔧 Configuration:"
     echo "Set environment variables to customize behavior:"
+    echo "  MCP_VOICE_INTERFACE_PORT=5114"
     echo "  VOICE_INTERFACE_URL=https://localhost:5114"
     echo "  VOICE_POLL_INTERVAL=2000"
     echo "  VOICE_MAX_MESSAGES=5"

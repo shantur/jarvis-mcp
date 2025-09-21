@@ -21,9 +21,10 @@ const plugin: Plugin = async (input: PluginInput): Promise<Hooks> => {
   const { client, project, directory } = input;
   
   // Initialize voice message service
+  const httpsPort = process.env.MCP_VOICE_INTERFACE_PORT || '5114';
   const voiceService = new VoiceMessageService(client, {
-    // Default to HTTP localhost voice interface (more reliable for background operations)
-    voiceInterfaceUrl: process.env.VOICE_INTERFACE_URL || 'http://localhost:5113',
+    // Default to HTTPS localhost voice interface (required for new architecture)
+    voiceInterfaceUrl: process.env.VOICE_INTERFACE_URL || `https://localhost:${httpsPort}`,
     // Poll interval for checking voice messages
     pollInterval: parseInt(process.env.VOICE_POLL_INTERVAL || '2000'), // 2 seconds
     // Maximum messages to process per poll

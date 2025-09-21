@@ -179,8 +179,17 @@ When accessing from phones/tablets, you'll see a security warning due to self-si
 # Install dependencies
 npm install
 
-# Build the project
+# Build everything (plugin + main project)
 npm run build
+
+# Build only the OpenCode plugin
+npm run build:plugin
+
+# Build only the main MCP server
+npm run build:main
+
+# Clean all build artifacts
+npm run clean
 
 # Run in development mode
 npm run dev
@@ -188,6 +197,15 @@ npm run dev
 # Run the MCP server directly
 npm run mcp
 ```
+
+### Build Process
+
+The build system handles both the main MCP server and the OpenCode plugin:
+
+1. **Plugin build**: Compiles TypeScript and creates bundled `plugin.js` for OpenCode
+2. **Main build**: Compiles the MCP server TypeScript code
+
+The plugin is built first since it's included in the npm package distribution.
 
 ## Requirements
 

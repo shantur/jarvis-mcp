@@ -28,10 +28,13 @@ const bundledCode = `/**
 ${voiceLoggerCode.replace(/export /g, '')}
 
 // === VoiceMessageService ===
-${voiceServiceCode.replace(/import.*from.*;\n/g, '').replace(/export /g, '')}
+${voiceServiceCode.replace(/import.*from\s+["']\.\/.*["'];\n/g, '').replace(/export /g, '')}
 
 // === Main Plugin ===
-${indexCode.replace(/import.*from.*;\n/g, '').replace(/export default /g, 'export const VoiceInterfacePlugin = ')}
+${indexCode.replace(/import.*from\s+["']\.\/.*["'];\n/g, '').replace(/export default /g, 'const VoiceInterfacePlugin = ')}
+
+// Export the plugin for OpenCode (ES module)
+export default VoiceInterfacePlugin;
 `;
 
 fs.writeFileSync(outputFile, bundledCode);
