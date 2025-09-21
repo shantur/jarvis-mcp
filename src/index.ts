@@ -546,7 +546,20 @@ async function stopBrowserInterface(): Promise<void> {
 }
 
 // Connect to STDIN transport
-export async function main() {
+export async function main(debugBrowser = false) {
+  // If debug browser flag is set, start browser interface immediately
+  if (debugBrowser) {
+    try {
+      const httpsUrl = await startBrowserInterfaceWithSmartOpen();
+      browserInterface.isRunning = true;
+      browserInterface.httpsUrl = httpsUrl;
+      console.error('[Debug] Browser interface started for development/testing');
+    } catch (error: any) {
+      console.error('[Debug] Failed to start browser interface:', error.message);
+      console.error('[Debug] Continuing with MCP server startup...');
+    }
+  }
+
   const transport = new StdioServerTransport();
   await mcpServer.connect(transport);
   console.error('[MCP] Connected to STDIN transport');

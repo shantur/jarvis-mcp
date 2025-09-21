@@ -11,6 +11,8 @@
             margin: 0 auto;
             padding: 20px;
             background-color: #f5f5f5;
+            min-height: 100vh;
+            box-sizing: border-box;
         }
 
         .container {
@@ -20,9 +22,29 @@
             box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
         }
 
+        /* Mobile optimizations */
+        @media (max-width: 768px) {
+            body {
+                padding: 12px;
+            }
+            
+            .container {
+                padding: 16px;
+                border-radius: 8px;
+            }
+        }
+
         h1 {
             color: #333;
             margin-bottom: 8px;
+            text-align: center;
+        }
+
+        @media (max-width: 768px) {
+            h1 {
+                font-size: 24px;
+                margin-bottom: 12px;
+            }
         }
 
         .status {
@@ -33,12 +55,34 @@
             background: #f8f9fa;
             border-radius: 8px;
             font-size: 14px;
+            flex-wrap: wrap;
         }
 
         .status-item {
             display: flex;
             align-items: center;
             gap: 8px;
+            flex: 1;
+            min-width: fit-content;
+        }
+
+        @media (max-width: 768px) {
+            .status {
+                gap: 12px;
+                margin-bottom: 16px;
+                padding: 10px;
+                font-size: 13px;
+            }
+            
+            .status-item {
+                flex: 1;
+                justify-content: center;
+                min-width: 0;
+            }
+            
+            .status-item span {
+                font-size: 12px;
+            }
         }
 
         .status-dot {
@@ -70,6 +114,7 @@
             gap: 12px;
             align-items: center;
             margin-bottom: 24px;
+            flex-wrap: wrap;
         }
 
         .voice-btn {
@@ -83,6 +128,26 @@
             display: flex;
             align-items: center;
             gap: 8px;
+            min-height: 44px; /* Minimum touch target size */
+            flex: 1;
+            justify-content: center;
+        }
+
+        @media (max-width: 768px) {
+            .voice-controls {
+                gap: 8px;
+                margin-bottom: 16px;
+                flex-direction: column;
+            }
+            
+            .voice-btn {
+                width: 100%;
+                padding: 16px 20px;
+                font-size: 18px;
+                min-height: 48px;
+                border-radius: 12px;
+                flex: none;
+            }
         }
 
         .voice-btn:hover {
@@ -118,6 +183,9 @@
             display: flex;
             align-items: center;
             gap: 8px;
+            min-height: 44px;
+            flex: 1;
+            justify-content: center;
         }
 
         .test-voice-btn:hover {
@@ -141,10 +209,26 @@
             border-radius: 6px;
             font-size: 14px;
             cursor: pointer;
+            min-height: 44px;
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
         .clear-btn:hover {
             background: #545b62;
+        }
+
+        @media (max-width: 768px) {
+            .clear-btn {
+                width: 100%;
+                padding: 14px 20px;
+                font-size: 16px;
+                min-height: 48px;
+                border-radius: 12px;
+                flex: none;
+            }
         }
 
         .speech-display {
@@ -156,6 +240,18 @@
             min-height: 60px;
             font-style: italic;
             color: #6c757d;
+            word-wrap: break-word;
+            line-height: 1.4;
+        }
+
+        @media (max-width: 768px) {
+            .speech-display {
+                padding: 12px;
+                margin-bottom: 16px;
+                min-height: 50px;
+                font-size: 15px;
+                line-height: 1.5;
+            }
         }
 
         .speech-display.active {
@@ -187,6 +283,36 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
+        }
+
+        @media (max-width: 768px) {
+            .voice-queue {
+                border-radius: 12px;
+                max-height: 250px;
+            }
+            
+            .queue-header {
+                padding: 10px 12px;
+                font-size: 14px;
+            }
+            
+            .queue-item {
+                padding: 10px 12px;
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 6px;
+            }
+            
+            .queue-text {
+                word-wrap: break-word;
+                width: 100%;
+                margin-right: 0 !important;
+            }
+            
+            .queue-meta {
+                align-self: flex-end;
+                font-size: 11px !important;
+            }
         }
 
         .queue-item:last-child {
@@ -253,16 +379,54 @@
             gap: 12px;
         }
 
+        .voice-control-section {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .voice-selection-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
         .speed-control label, .voice-control label {
             font-weight: 500;
             color: #333;
             min-width: 100px;
         }
 
+        @media (max-width: 768px) {
+            .speech-controls {
+                margin-bottom: 16px;
+                padding: 12px;
+                gap: 12px;
+            }
+            
+            .speed-control, .voice-control {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 8px;
+            }
+
+            .voice-selection-row {
+                flex-direction: column;
+                gap: 8px;
+            }
+            
+            .speed-control label, .voice-control label {
+                min-width: auto;
+                font-size: 14px;
+                text-align: center;
+            }
+        }
+
         .speed-control input[type="range"] {
             flex: 1;
             max-width: 200px;
             margin: 0 8px;
+            height: 20px;
         }
 
         .speed-control span {
@@ -281,6 +445,63 @@
             background: white;
             font-size: 14px;
             color: #495057;
+            min-height: 44px;
+        }
+
+        /* Test voice button in voice control section */
+        .voice-selection-row .test-voice-btn {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            min-height: 44px;
+            white-space: nowrap;
+        }
+
+        .voice-selection-row .test-voice-btn:hover {
+            background: #0056b3;
+        }
+
+        .voice-selection-row .test-voice-btn:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
+
+        @media (max-width: 768px) {
+            .speed-control input[type="range"] {
+                max-width: none;
+                margin: 0;
+                height: 30px;
+                width: 100%;
+            }
+            
+            .speed-control span {
+                font-size: 16px;
+                font-weight: 600;
+            }
+            
+            .voice-control select {
+                max-width: none;
+                padding: 12px;
+                font-size: 16px;
+                min-height: 48px;
+                border-radius: 8px;
+            }
+
+            .voice-selection-row .test-voice-btn {
+                width: 100%;
+                padding: 12px 20px;
+                font-size: 16px;
+                min-height: 48px;
+                border-radius: 8px;
+                justify-content: center;
+            }
         }
 
         .voice-control select:focus {
@@ -322,6 +543,42 @@
             border-radius: 12px;
             cursor: pointer;
             transition: background 0.3s ease;
+            min-width: 50px;
+        }
+
+        @media (max-width: 768px) {
+            .always-on-control {
+                flex-direction: column;
+                align-items: center;
+                gap: 8px;
+                text-align: center;
+            }
+            
+            .always-on-control label {
+                font-size: 14px;
+                order: 1;
+            }
+            
+            .toggle-switch {
+                width: 60px;
+                height: 30px;
+                border-radius: 15px;
+                order: 2;
+            }
+            
+            .toggle-switch::before {
+                width: 26px !important;
+                height: 26px !important;
+            }
+            
+            .toggle-switch.active::before {
+                transform: translateX(30px) !important;
+            }
+            
+            .always-on-indicator {
+                order: 3;
+                font-size: 12px;
+            }
         }
 
         .toggle-switch.active {
@@ -373,11 +630,89 @@
             font-size: 16px;
             line-height: 1.4;
             font-style: italic;
+            word-wrap: break-word;
+        }
+
+        @media (max-width: 768px) {
+            .ai-speech-display {
+                padding: 12px;
+                margin-bottom: 16px;
+                border-radius: 12px;
+            }
+            
+            .ai-speech-header {
+                font-size: 13px;
+                margin-bottom: 6px;
+            }
+            
+            .ai-speech-text {
+                font-size: 15px;
+                line-height: 1.5;
+            }
         }
 
         @keyframes fadeIn {
             from { opacity: 0; transform: translateY(-10px); }
             to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Mobile touch improvements */
+        @media (max-width: 768px) {
+            /* Improve touch target sizes */
+            button, select, input[type="range"] {
+                -webkit-appearance: none;
+                appearance: none;
+            }
+            
+            /* Better tap highlighting */
+            button {
+                -webkit-tap-highlight-color: rgba(0, 0, 0, 0.1);
+                tap-highlight-color: rgba(0, 0, 0, 0.1);
+            }
+            
+            /* Prevent zoom on form inputs */
+            input, select, textarea {
+                font-size: 16px !important;
+            }
+            
+            /* Improve scrolling on iOS */
+            .voice-queue {
+                -webkit-overflow-scrolling: touch;
+            }
+            
+            /* Better spacing for small screens */
+            .container {
+                margin: 0;
+                min-height: calc(100vh - 24px);
+                display: flex;
+                flex-direction: column;
+            }
+            
+            .voice-queue {
+                flex: 1;
+                min-height: 200px;
+            }
+        }
+
+        /* Very small screens (phones in portrait) */
+        @media (max-width: 480px) {
+            body {
+                padding: 8px;
+            }
+            
+            .container {
+                padding: 12px;
+            }
+            
+            .status {
+                font-size: 12px;
+                padding: 8px;
+            }
+            
+            .voice-btn {
+                font-size: 16px;
+                padding: 14px 16px;
+            }
         }
     </style>
 </head>
@@ -406,32 +741,37 @@
                 </svg>
                 <span id="voiceBtnText">Start Listening</span>
             </button>
-            <button class="test-voice-btn" id="testVoiceBtn">
-                <svg class="speaker-icon" viewBox="0 0 24 24" width="16" height="16">
-                    <path d="M3 9V15H7L12 20V4L7 9H3ZM16.5 12C16.5 10.23 15.48 8.71 14 7.97V16.02C15.48 15.29 16.5 13.77 16.5 12ZM14 3.23V5.29C16.89 6.15 19 8.83 19 12S16.89 17.85 14 18.71V20.77C18.01 19.86 21 16.28 21 12S18.01 4.14 14 3.23Z"/>
-                </svg>
-                Test Voice
-            </button>
+
             <button class="clear-btn" id="clearBtn">Clear Queue</button>
         </div>
 
         <div class="speech-controls">
+            <div class="always-on-control">
+                <label for="alwaysOnToggle">Keep Microphone Always On:</label>
+                <div class="toggle-switch" id="alwaysOnToggle"></div>
+                <span class="always-on-indicator" id="alwaysOnIndicator" style="display: none;">🔴 ALWAYS LISTENING</span>
+            </div>
             <div class="speed-control">
                 <label for="speedSlider">Speech Speed:</label>
                 <input type="range" id="speedSlider" min="0.5" max="2.0" step="0.1" value="1.0">
                 <span id="speedValue">1.0x</span>
             </div>
-            <div class="voice-control">
-                <label for="voiceSelect">Voice:</label>
-                <select id="voiceSelect">
-                    <option value="">Loading voices...</option>
-                </select>
-                <span class="preferences-saved" id="preferencesSaved" style="display: none;">✓ Saved</span>
-            </div>
-            <div class="always-on-control">
-                <label for="alwaysOnToggle">Keep Microphone Always On:</label>
-                <div class="toggle-switch" id="alwaysOnToggle"></div>
-                <span class="always-on-indicator" id="alwaysOnIndicator" style="display: none;">🔴 ALWAYS LISTENING</span>
+            <div class="voice-control-section">
+                <div class="voice-control">
+                    <label for="voiceSelect">Voice:</label>
+                    <div class="voice-selection-row">
+                        <select id="voiceSelect">
+                            <option value="">Loading voices...</option>
+                        </select>
+                        <button class="test-voice-btn" id="testVoiceBtn">
+                            <svg class="speaker-icon" viewBox="0 0 24 24" width="16" height="16">
+                                <path d="M3 9V15H7L12 20V4L7 9H3ZM16.5 12C16.5 10.23 15.48 8.71 14 7.97V16.02C15.48 15.29 16.5 13.77 16.5 12ZM14 3.23V5.29C16.89 6.15 19 8.83 19 12S16.89 17.85 14 18.71V20.77C18.01 19.86 21 16.28 21 12S18.01 4.14 14 3.23Z"/>
+                            </svg>
+                            Test Voice
+                        </button>
+                    </div>
+                    <span class="preferences-saved" id="preferencesSaved" style="display: none;">✓ Saved</span>
+                </div>
             </div>
         </div>
 

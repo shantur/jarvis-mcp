@@ -97,8 +97,14 @@ export class VoiceQueue {
 
   // Voice state management
   setVoiceActive(active: boolean): void {
+    const previousState = this.voiceActive;
     this.voiceActive = active;
-    console.error(`[Queue] Voice ${active ? 'activated' : 'deactivated'}`);
+    
+    // Only log when state actually changes to reduce noise in always-on mode
+    if (previousState !== active) {
+      console.error(`[Queue] Voice ${active ? 'activated' : 'deactivated'}`);
+    }
+    
     this.broadcastStatusUpdate();
   }
 

@@ -18,6 +18,7 @@ interface CLIOptions {
   global?: boolean;
   help?: boolean;
   version?: boolean;
+  debugBrowser?: boolean;
 }
 
 function parseArgs(): CLIOptions {
@@ -52,6 +53,9 @@ function parseArgs(): CLIOptions {
       case '-v':
         options.version = true;
         break;
+      case '--debug-browser':
+        options.debugBrowser = true;
+        break;
       default:
         if (arg.startsWith('--')) {
           console.error(`Unknown option: ${arg}`);
@@ -77,18 +81,20 @@ Options:
   --install-opencode-plugin    Install OpenCode plugin for voice message forwarding
   --local                      Install config/plugin in current directory
   --global                     Install config/plugin globally
+  --debug-browser              Start browser interface immediately for development/testing
   --help, -h                   Show this help message
   --version, -v                Show version information
 
 Examples:
   npx mcp-voice-interface                                     # Run the MCP server
+  npx mcp-voice-interface --debug-browser                     # Run with browser interface pre-started
   npx mcp-voice-interface --install-claude-config            # Setup for Claude Desktop
   npx mcp-voice-interface --install-opencode-config --local  # Setup for OpenCode in current dir  
   npx mcp-voice-interface --install-claude-code-config       # Setup for Claude Code CLI
   npx mcp-voice-interface --install-opencode-plugin --local  # Install OpenCode plugin in project
   
 After installation:
-  - Browser interface: https://localhost:5114 (HTTPS, recommended) or http://localhost:5113 (HTTP, fallback)
+  - Browser interface: https://localhost:5114 (starts automatically on first converse call)
   - Use 'converse' tool or prompt for voice conversations
   - Adjust voice speed and select voices in the browser interface
 `);
@@ -254,13 +260,13 @@ function installOpencodePlugin(useLocal: boolean) {
   }
 }
 
-async function runMCPServer() {
+async function runMCPServer(debugBrowser = false) {
   console.log('Starting MCP Voice Interface...');
   
   // Import and run the main server
   try {
     const { main } = await import('./index.js');
-    await main();
+    await main(debugBrowser);
   } catch (error) {
     console.error('❌ Failed to start MCP server:', error);
     process.exit(1);
@@ -305,7 +311,7 @@ async function main() {
   }
   
   // Default: run the MCP server
-  await runMCPServer();
+  await runMCPServer(options.debugBrowser);
 }
 
 // Handle uncaught errors

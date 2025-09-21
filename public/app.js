@@ -91,14 +91,22 @@ class VoiceInterfaceClient {
             this.isListening = true;
             this.currentSessionTranscript = ''; // Reset transcript for new session
             this.updateVoiceUI();
-            this.setVoiceState(true);
+            
+            // Only set voice state if not in always-on mode, or if this is the first activation
+            if (!this.alwaysOnMode) {
+                this.setVoiceState(true);
+            }
         };
         
         this.recognition.onend = () => {
             console.log('[Speech] Recognition ended');
             this.isListening = false;
             this.updateVoiceUI();
-            this.setVoiceState(false);
+            
+            // Only set voice state to false if not in always-on mode
+            if (!this.alwaysOnMode) {
+                this.setVoiceState(false);
+            }
             
             // Send final accumulated transcript if we have any
             if (this.currentSessionTranscript && this.currentSessionTranscript.trim()) {
@@ -110,42 +118,54 @@ class VoiceInterfaceClient {
             
             // Auto-restart if in always-on mode and not speaking
             if (this.alwaysOnMode && !this.isSpeaking) {
-                console.log('[Speech] Auto-restarting recognition in always-on mode');
+                console.log('[Speech] Auto-restarting recognition in 100ms');
                 this.restartTimeout = setTimeout(() => {
                     this.startListening();
-                }, 1000); // Longer delay for non-continuous mode
+                }, 100);
             }
         };
         
         this.recognition.onresult = (event) => {
             console.log('[Speech] Recognition result event:', event);
             
-            // In non-continuous mode, just take the last result
-            if (event.results.length > 0) {
-                const lastResult = event.results[event.results.length - 1];
-                const transcript = lastResult[0].transcript;
+            // Build cumulative transcript from all results
+            let interimTranscript = '';
+            let finalTranscript = '';
+            
+            for (let i = 0; i < event.results.length; i++) {
+                const result = event.results[i];
+                const transcript = result[0].transcript;
                 
-                console.log('[Speech] Last result:', { 
-                    isFinal: lastResult.isFinal, 
-                    transcript: transcript,
-                    transcriptType: typeof transcript 
-                });
-                
-                // Validate transcript before using it
-                if (transcript && typeof transcript === 'string' && transcript !== 'undefined' && transcript.trim() !== '') {
-                    if (lastResult.isFinal) {
-                        this.currentSessionTranscript = transcript.trim();
-                        console.log('[Speech] Final transcript set to:', this.currentSessionTranscript);
-                    }
-                    
-                    // Display current speech
-                    this.speechDisplay.textContent = transcript;
-                    this.speechDisplay.classList.add('active');
+                if (result.isFinal) {
+                    finalTranscript += transcript;
                 } else {
-                    console.warn('[Speech] Invalid transcript:', { transcript, type: typeof transcript });
-                    this.speechDisplay.textContent = 'Listening...';
-                    this.speechDisplay.classList.remove('active');
+                    interimTranscript += transcript;
                 }
+            }
+            
+            // Combine final and interim for display
+            const displayTranscript = finalTranscript + interimTranscript;
+            
+            console.log('[Speech] Cumulative result:', { 
+                finalTranscript: finalTranscript,
+                interimTranscript: interimTranscript,
+                displayTranscript: displayTranscript
+            });
+            
+            // Validate and display transcript
+            if (displayTranscript && displayTranscript.trim() !== '') {
+                // Store final transcript for sending
+                if (finalTranscript) {
+                    this.currentSessionTranscript = finalTranscript.trim();
+                    console.log('[Speech] Final transcript set to:', this.currentSessionTranscript);
+                }
+                
+                // Display cumulative speech (final + interim)
+                this.speechDisplay.textContent = displayTranscript;
+                this.speechDisplay.classList.add('active');
+            } else {
+                this.speechDisplay.textContent = 'Listening...';
+                this.speechDisplay.classList.remove('active');
             }
         };
         
@@ -157,12 +177,12 @@ class VoiceInterfaceClient {
             
             // Handle errors in always-on mode
             if (this.alwaysOnMode && !this.isSpeaking) {
-                console.log('[Speech] Attempting to restart recognition after error in always-on mode');
+                console.log('[Speech] Attempting to restart recognition after error in 100ms');
                 this.restartTimeout = setTimeout(() => {
                     if (this.alwaysOnMode && !this.isListening && !this.isSpeaking) {
                         this.startListening();
                     }
-                }, 2000); // Longer delay for error recovery
+                }, 100);
             }
         };
     }
@@ -398,11 +418,15 @@ class VoiceInterfaceClient {
         this.updateAlwaysOnUI();
         
         if (this.alwaysOnMode) {
+            // Set voice state to active when enabling always-on mode
+            this.setVoiceState(true);
             // Start listening when enabling always-on mode
             this.startListening();
         } else {
             // Stop listening when disabling always-on mode
             this.stopListening();
+            // Set voice state to inactive when disabling always-on mode
+            this.setVoiceState(false);
         }
         
         // Save preference
@@ -509,18 +533,23 @@ class VoiceInterfaceClient {
             this.voiceBtn.disabled = false;
             this.voiceStatus.classList.add('active');
         } else {
-            this.voiceBtn.classList.remove('listening');
             if (this.alwaysOnMode) {
+                // In always-on mode, keep showing "Always Listening" even during brief restarts
+                this.voiceBtn.classList.add('listening');
                 this.voiceBtnText.textContent = 'Turn Off Always-On';
-                this.voiceText.textContent = 'Always-On (Restarting...)';
+                this.voiceText.textContent = 'Always Listening';
+                this.voiceBtn.disabled = false;
+                this.voiceStatus.classList.add('active');
             } else {
+                // Normal mode - show inactive state
+                this.voiceBtn.classList.remove('listening');
                 this.voiceBtnText.textContent = 'Start Listening';
                 this.voiceText.textContent = 'Voice Inactive';
                 this.speechDisplay.textContent = 'Start speaking and your words will appear here...';
                 this.speechDisplay.classList.remove('active');
+                this.voiceBtn.disabled = this.isSpeaking ? true : !this.isConnected;
+                this.voiceStatus.classList.remove('active');
             }
-            this.voiceBtn.disabled = this.isSpeaking ? true : !this.isConnected;
-            this.voiceStatus.classList.remove('active');
         }
         
         // Update test voice button
