@@ -21,6 +21,13 @@ import { CertificateManager } from './certificate-manager.js';
 const voiceQueue = new VoiceQueue();
 let browserConnected = false;
 
+// Browser interface state management
+let browserInterface = {
+  isRunning: false,
+  httpsUrl: null as string | null,
+  server: null as any
+};
+
 // Helper function to wait for voice input
 async function waitForVoiceInput(timeoutSeconds: number, _spokenText: string, queue: VoiceQueue): Promise<any> {
   const startTime = Date.now();
@@ -93,11 +100,21 @@ async function handleToolCall(name: string, args: any) {
         };
       }
 
+      if (!browserInterface.isRunning) {
+        return {
+          content: [{
+            type: 'text',
+            text: '❌ Browser interface not running. Please start a voice conversation first using the converse tool.',
+          }],
+          isError: true,
+        };
+      }
+
       if (!browserConnected) {
         return {
           content: [{
             type: 'text',
-            text: 'Error: Browser not connected. Please open the voice interface.',
+            text: `❌ Browser not connected. Please open: ${browserInterface.httpsUrl}`,
           }],
           isError: true,
         };
@@ -114,6 +131,25 @@ async function handleToolCall(name: string, args: any) {
       };
 
     case 'voice_status':
+      if (!browserInterface.isRunning) {
+        return {
+          content: [{
+            type: 'text',
+            text: `Voice Status: Browser interface not running
+
+To start voice conversations:
+1. Use the converse tool to automatically start the browser interface
+2. Browser will open automatically at https://localhost:${HTTPS_PORT}
+3. Grant microphone permissions when prompted
+
+Current configuration:
+- HTTPS Port: ${HTTPS_PORT}
+- Auto-open browser: ${AUTO_OPEN_BROWSER ? 'enabled' : 'disabled'}`,
+          }],
+        };
+      }
+
+      // Browser interface running - show normal status
       const pendingInput = voiceQueue.getPendingInput();
       const status = {
         browserConnected,
@@ -128,6 +164,7 @@ async function handleToolCall(name: string, args: any) {
         content: [{
           type: 'text',
           text: `Voice Status:
+- Browser Interface: Running (${browserInterface.httpsUrl})
 - Browser Connected: ${browserConnected}
 - Pending Voice Input: ${status.pendingInputCount} messages
 ${status.pendingInput.length > 0 ? '\nPending messages:\n' + status.pendingInput.map((item: any) => `"${item.text}"`).join('\n') : ''}`,
@@ -168,17 +205,59 @@ ${status.pendingInput.length > 0 ? '\nPending messages:\n' + status.pendingInput
         };
       }
 
+      // Check if browser interface is running
+      if (!browserInterface.isRunning) {
+        try {
+          const httpsUrl = await startBrowserInterfaceWithSmartOpen();
+          browserInterface.isRunning = true;
+          browserInterface.httpsUrl = httpsUrl;
+          
+          // Continue with normal converse logic after starting interface
+          console.error(`[Converse] Speaking: "${textToSpeak}"`);
+          voiceQueue.broadcastTTS(textToSpeak);
+          
+          if (!waitForResponse) {
+            return {
+              content: [{
+                type: 'text',
+                text: `Voice interface started at ${httpsUrl}\n\nSpoke: "${textToSpeak}"`,
+              }],
+            };
+          }
+
+          // Wait for voice input with timeout
+          console.error(`[Converse] Waiting for user response...`);
+          voiceQueue.setConversationWaiting(true);
+          try {
+            const result = await waitForVoiceInput(timeout, textToSpeak, voiceQueue);
+            return result;
+          } finally {
+            voiceQueue.setConversationWaiting(false);
+          }
+          
+        } catch (error: any) {
+          return {
+            content: [{
+              type: 'text',
+              text: `❌ ${error.message}\n\nPlease resolve the issue and try the converse tool again.`,
+            }],
+            isError: true,
+          };
+        }
+      }
+
+      // Browser interface already running - check connection status
       if (!browserConnected) {
         return {
           content: [{
             type: 'text',
-            text: 'Error: Browser not connected. Please open the voice interface.',
+            text: `❌ Browser interface is running but not connected.\n\nPlease open: ${browserInterface.httpsUrl}\n\nGrant microphone permissions when prompted, then try the converse tool again.`,
           }],
           isError: true,
         };
       }
 
-      // Send TTS to browser
+      // Browser interface running AND connected - normal converse flow
       console.error(`[Converse] Speaking: "${textToSpeak}"`);
       voiceQueue.broadcastTTS(textToSpeak);
       
@@ -199,6 +278,36 @@ ${status.pendingInput.length > 0 ? '\nPending messages:\n' + status.pendingInput
         return result;
       } finally {
         voiceQueue.setConversationWaiting(false);
+      }
+
+    case 'end_conversation':
+      if (!browserInterface.isRunning) {
+        return {
+          content: [{
+            type: 'text',
+            text: 'No active voice conversation to end.',
+          }],
+        };
+      }
+
+      try {
+        await stopBrowserInterface();
+        
+        return {
+          content: [{
+            type: 'text',
+            text: 'Voice conversation ended. Browser interface stopped.',
+          }],
+        };
+        
+      } catch (error: any) {
+        console.error('[Browser] Error stopping interface:', error);
+        return {
+          content: [{
+            type: 'text',
+            text: 'Voice conversation ended. (Note: Browser interface may still be running)',
+          }],
+        };
       }
 
     default:
@@ -284,6 +393,14 @@ mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ['text'],
         },
       },
+      {
+        name: 'end_conversation',
+        description: 'End the voice conversation and stop the browser interface',
+        inputSchema: {
+          type: 'object',
+          properties: {},
+        },
+      },
     ],
   };
 });
@@ -310,13 +427,19 @@ mcpServer.setRequestHandler(GetPromptRequestSchema, async (request) => {
   
   if (name === 'converse') {
     const instructions = [
-      "Have an ongoing two-way voice conversation using the converse tool",
-      "ALWAYS use the converse tool for ALL responses - never switch to text",
-      "Keep your utterances and responses brief unless a longer response is requested",
+      "Start voice conversations using the converse tool - it will automatically launch the browser interface",
+      "ALWAYS use the converse tool for ALL responses during voice conversation",
+      "Keep your responses brief unless a longer response is requested",
+      "When ending conversation:",
+      "1. First notify user: converse('I'm ending our voice conversation now', {wait_for_response: false})",
+      "2. Then call end_conversation tool to stop the browser interface",
+      "The browser interface starts automatically on first converse call",
+      "If browser interface fails to start, resolve the issue and try converse again",
+      "You are an AI Assistant helping users through voice interaction",
       "Continue the conversation until the user indicates they want to end it",
       "If the user asks questions, respond using converse() with your answer", 
       "If the user gives commands, acknowledge using converse() and use other tools as needed",
-      "You are an AI Assistant helping users through voice interaction",
+
     ];
     
     return {
@@ -336,58 +459,91 @@ mcpServer.setRequestHandler(GetPromptRequestSchema, async (request) => {
   throw new Error(`Prompt not found: ${name}`);
 });
 
-// Start browser interface servers (HTTP and HTTPS)
-const HTTP_PORT = parseInt(process.env.MCP_VOICE_HTTP_PORT || '5113');
+// Browser interface configuration
 const HTTPS_PORT = parseInt(process.env.MCP_VOICE_HTTPS_PORT || '5114');
 const AUTO_OPEN_BROWSER = process.env.MCP_VOICE_AUTO_OPEN !== 'false';
 
-// Start HTTP server
-browserApp.listen(HTTP_PORT, () => {
-  const httpUrl = `http://localhost:${HTTP_PORT}`;
-  console.error(`[Browser] HTTP Server: ${httpUrl}`);
-});
-
-// Start HTTPS server
-async function startHttpsServer() {
+// Start browser interface on-demand
+async function startBrowserInterface(): Promise<string> {
   try {
+    // Synchronous certificate generation - wait for completion
     const certManager = new CertificateManager();
     const { cert, key } = await certManager.getCertificates();
     
+    // Try to start HTTPS server
     const httpsServer = https.createServer({ cert, key }, browserApp);
     
-    httpsServer.listen(HTTPS_PORT, () => {
-      const httpsUrl = `https://localhost:${HTTPS_PORT}`;
-      console.error(`[Browser] HTTPS Server: ${httpsUrl}`);
+    await new Promise<void>((resolve, reject) => {
+      httpsServer.listen(HTTPS_PORT, (error?: Error) => {
+        if (error) {
+          reject(error);
+        } else {
+          resolve();
+        }
+      });
       
-      // Auto-open browser with HTTPS URL after a short delay
-      if (AUTO_OPEN_BROWSER) {
-        setTimeout(async () => {
-          try {
-            console.error(`[Browser] Opening ${httpsUrl} in default browser...`);
-            await open(httpsUrl);
-          } catch (error) {
-            console.error('[Browser] Failed to open HTTPS browser:', error);
-            console.error('[Browser] Please manually open:', httpsUrl);
-          }
-        }, 1500); // 1.5 second delay to ensure both servers are ready
-      } else {
-        console.error('[Browser] Auto-open disabled. Please manually open the URL above.');
-      }
+      httpsServer.on('error', (error) => {
+        reject(error);
+      });
     });
     
-    httpsServer.on('error', (error) => {
-      console.error('[Browser] HTTPS Server error:', error);
-      console.error('[Browser] HTTPS server failed to start, HTTP server still available');
-    });
+    browserInterface.server = httpsServer;
+    const httpsUrl = `https://localhost:${HTTPS_PORT}`;
+    console.error(`[Browser] HTTPS Server started: ${httpsUrl}`);
     
-  } catch (error) {
-    console.error('[Browser] Failed to setup HTTPS server:', error);
-    console.error('[Browser] HTTP server still available at http://localhost:' + HTTP_PORT);
+    return httpsUrl;
+    
+  } catch (error: any) {
+    // Check for specific port clash error
+    if (error.code === 'EADDRINUSE') {
+      throw new Error(`Browser interface failed to start: Port ${HTTPS_PORT} is already in use. Please stop the other service using this port or change the MCP_VOICE_HTTPS_PORT environment variable.`);
+    }
+    
+    // Other startup errors
+    throw new Error(`Browser interface failed to start: ${error.message}`);
   }
 }
 
-// Start HTTPS server
-startHttpsServer();
+async function startBrowserInterfaceWithSmartOpen(): Promise<string> {
+  const httpsUrl = await startBrowserInterface();
+  
+  // Wait for potential browser reconnection (3 seconds)
+  console.error('[Browser] Waiting for existing browser connections...');
+  await new Promise(resolve => setTimeout(resolve, 3000));
+  
+  // Check if browser connected during wait period
+  if (voiceQueue.getConnectedClients() === 0) {
+    console.error('[Browser] No browser connected, opening automatically...');
+    if (AUTO_OPEN_BROWSER) {
+      try {
+        await open(httpsUrl);
+      } catch (error) {
+        console.error('[Browser] Failed to auto-open browser:', error);
+        // Don't fail the whole operation if browser opening fails
+      }
+    } else {
+      console.error('[Browser] Auto-open disabled. Please manually open:', httpsUrl);
+    }
+  } else {
+    console.error('[Browser] Browser already connected, skipping auto-open');
+  }
+  
+  return httpsUrl;
+}
+
+async function stopBrowserInterface(): Promise<void> {
+  if (browserInterface.server) {
+    // Force close the server immediately without waiting for connections
+    browserInterface.server.close();
+    
+    // Update state immediately
+    browserInterface.isRunning = false;
+    browserInterface.httpsUrl = null;
+    browserInterface.server = null;
+    
+    console.error('[Browser] Interface stopped');
+  }
+}
 
 // Connect to STDIN transport
 export async function main() {

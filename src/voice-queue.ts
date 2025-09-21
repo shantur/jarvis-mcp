@@ -207,6 +207,11 @@ export class VoiceQueue {
     console.error(`[Queue] Conversation waiting state: ${waiting}`);
   }
 
+  // Get connected client count
+  getConnectedClients(): number {
+    return this.sseClients.size;
+  }
+
   // Get stats for debugging
   getStats() {
     return {
@@ -214,7 +219,6 @@ export class VoiceQueue {
       pendingInputs: this.getPendingInput().length,
       connectedClients: this.sseClients.size,
       voiceActive: this.voiceActive,
-
       conversationWaiting: this.conversationWaiting
     };
   }
