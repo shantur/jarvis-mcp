@@ -364,13 +364,71 @@
 
         .speech-controls {
             margin-bottom: 24px;
-            padding: 16px;
             background: #f8f9fa;
             border-radius: 8px;
             border: 1px solid #dee2e6;
+            overflow: hidden;
+        }
+        
+        .speech-controls-header {
+            padding: 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #e9ecef;
+            border-bottom: 1px solid #dee2e6;
+            cursor: pointer;
+            font-weight: 500;
+            user-select: none;
+        }
+        
+        .speech-controls-header:hover {
+            background: #dee2e6;
+        }
+        
+        .speech-controls-content {
+            padding: 16px;
             display: flex;
             flex-direction: column;
             gap: 16px;
+            max-height: 1000px;
+            overflow: hidden;
+            transition: max-height 0.3s ease, padding 0.3s ease;
+        }
+        
+        .speech-controls.collapsed .speech-controls-content {
+            max-height: 0;
+            padding-top: 0;
+            padding-bottom: 0;
+        }
+        
+        .toggle-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 4px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s ease, transform 0.3s ease;
+        }
+        
+        .toggle-btn:hover {
+            background: rgba(0, 0, 0, 0.1);
+        }
+        
+        .chevron-icon {
+            fill: currentColor;
+            transition: transform 0.3s ease;
+        }
+        
+        .speech-controls.collapsed .chevron-icon {
+            transform: rotate(90deg);
+        }
+        
+        .speech-controls:not(.collapsed) .chevron-icon {
+            transform: rotate(-90deg);
         }
 
         .speed-control, .voice-control {
@@ -400,8 +458,21 @@
         @media (max-width: 768px) {
             .speech-controls {
                 margin-bottom: 16px;
+            }
+            
+            .speech-controls-header {
+                padding: 12px;
+                font-size: 14px;
+            }
+            
+            .speech-controls-content {
                 padding: 12px;
                 gap: 12px;
+            }
+            
+            .speech-controls.collapsed .speech-controls-content {
+                padding-top: 0;
+                padding-bottom: 0;
             }
             
             .speed-control, .voice-control {
@@ -751,8 +822,17 @@
             <button class="clear-btn" id="clearBtn">Clear Queue</button>
         </div>
 
-        <div class="speech-controls">
-            <div class="always-on-control">
+        <div class="speech-controls collapsed" id="speechControls">
+            <div class="speech-controls-header" id="speechControlsHeader">
+                <span>⚙️ Voice Settings</span>
+                <button class="toggle-btn" id="speechControlsToggle">
+                    <svg class="chevron-icon" viewBox="0 0 24 24" width="16" height="16">
+                        <path d="M8.59 16.59L13.17 12L8.59 7.41L10 6L16 12L10 18L8.59 16.59Z"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="speech-controls-content" id="speechControlsContent">
+                <div class="always-on-control">
                 <label for="alwaysOnToggle">Keep Microphone Always On:</label>
                 <div class="toggle-switch" id="alwaysOnToggle"></div>
                 <span class="always-on-indicator" id="alwaysOnIndicator" style="display: none;">🔴 ALWAYS LISTENING</span>
@@ -774,6 +854,42 @@
             </div>
             <div class="voice-control-section">
                 <div class="voice-control">
+                    <label for="languageSelect">Language:</label>
+                    <select id="languageSelect">
+                        <option value="en-US">English (US)</option>
+                        <option value="en-GB">English (UK)</option>
+                        <option value="en-AU">English (Australia)</option>
+                        <option value="en-CA">English (Canada)</option>
+                        <option value="es-ES">Spanish (Spain)</option>
+                        <option value="es-MX">Spanish (Mexico)</option>
+                        <option value="fr-FR">French (France)</option>
+                        <option value="fr-CA">French (Canada)</option>
+                        <option value="de-DE">German</option>
+                        <option value="it-IT">Italian</option>
+                        <option value="pt-BR">Portuguese (Brazil)</option>
+                        <option value="pt-PT">Portuguese (Portugal)</option>
+                        <option value="ru-RU">Russian</option>
+                        <option value="ja-JP">Japanese</option>
+                        <option value="ko-KR">Korean</option>
+                        <option value="zh-CN">Chinese (Simplified)</option>
+                        <option value="zh-TW">Chinese (Traditional)</option>
+                        <option value="ar-SA">Arabic</option>
+                        <option value="hi-IN">Hindi</option>
+                        <option value="nl-NL">Dutch</option>
+                        <option value="sv-SE">Swedish</option>
+                        <option value="da-DK">Danish</option>
+                        <option value="no-NO">Norwegian</option>
+                        <option value="fi-FI">Finnish</option>
+                        <option value="pl-PL">Polish</option>
+                        <option value="tr-TR">Turkish</option>
+                        <option value="he-IL">Hebrew</option>
+                        <option value="th-TH">Thai</option>
+                        <option value="vi-VN">Vietnamese</option>
+                        <option value="id-ID">Indonesian</option>
+                        <option value="ms-MY">Malay</option>
+                    </select>
+                </div>
+                <div class="voice-control">
                     <label for="voiceSelect">Voice:</label>
                     <div class="voice-selection-row">
                         <select id="voiceSelect">
@@ -788,6 +904,7 @@
                     </div>
                     <span class="preferences-saved" id="preferencesSaved" style="display: none;">✓ Saved</span>
                 </div>
+            </div>
             </div>
         </div>
 

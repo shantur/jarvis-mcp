@@ -23,10 +23,14 @@ class VoiceInterfaceClient {
         this.aiSpeechDisplay = document.getElementById('aiSpeechDisplay');
         this.aiSpeechText = document.getElementById('aiSpeechText');
         this.voiceSelect = document.getElementById('voiceSelect');
+        this.languageSelect = document.getElementById('languageSelect');
         this.alwaysOnToggle = document.getElementById('alwaysOnToggle');
         this.alwaysOnIndicator = document.getElementById('alwaysOnIndicator');
         this.pauseDuringSpeechToggle = document.getElementById('pauseDuringSpeechToggle');
         this.stopAiOnUserSpeechToggle = document.getElementById('stopAiOnUserSpeechToggle');
+        this.speechControls = document.getElementById('speechControls');
+        this.speechControlsHeader = document.getElementById('speechControlsHeader');
+        this.speechControlsToggle = document.getElementById('speechControlsToggle');
         
         // TTS state
         this.isSpeaking = false;
@@ -39,12 +43,16 @@ class VoiceInterfaceClient {
         // Always-on microphone state
         this.alwaysOnMode = false;
         this.restartTimeout = null;
+        this.isAutoRestarting = false;
         
         // Pause during speech state (default: true to prevent echo/feedback)
         this.pauseDuringSpeech = true;
         
         // Stop AI when user speaks (default: true for natural conversation)
         this.stopAiOnUserSpeech = true;
+        
+        // Speech recognition language (default: en-US)
+        this.selectedLanguage = 'en-US';
         
         // Speech session tracking
         this.currentSessionTranscript = '';
@@ -92,7 +100,7 @@ class VoiceInterfaceClient {
         
         this.recognition.continuous = false; // Change to false for mobile
         this.recognition.interimResults = true;
-        this.recognition.lang = 'en-US';
+        this.recognition.lang = this.selectedLanguage;
         
         // Track accumulated transcript for current session
         this.currentSessionTranscript = '';
@@ -131,10 +139,13 @@ class VoiceInterfaceClient {
             if (this.alwaysOnMode || (!this.pauseDuringSpeech && this.wasListeningBeforeTTS)) {
                 const reason = this.alwaysOnMode ? 'always-on mode' : 'pause disabled during AI speech';
                 console.log(`[Speech] Auto-restarting recognition in 100ms (${reason})`);
+                this.isAutoRestarting = true;
                 this.restartTimeout = setTimeout(() => {
                     if (!this.isListening && (this.alwaysOnMode || (!this.pauseDuringSpeech && this.wasListeningBeforeTTS))) {
                         this.startListening();
                     }
+                    this.restartTimeout = null; // Clear timeout after execution
+                    this.isAutoRestarting = false; // Clear auto-restart flag
                 }, 100);
             }
         };
@@ -202,10 +213,13 @@ class VoiceInterfaceClient {
             if (this.alwaysOnMode || (!this.pauseDuringSpeech && this.wasListeningBeforeTTS)) {
                 const reason = this.alwaysOnMode ? 'always-on mode' : 'pause disabled during AI speech';
                 console.log(`[Speech] Attempting to restart recognition after error in 100ms (${reason})`);
+                this.isAutoRestarting = true;
                 this.restartTimeout = setTimeout(() => {
                     if (!this.isListening && (this.alwaysOnMode || (!this.pauseDuringSpeech && this.wasListeningBeforeTTS))) {
                         this.startListening();
                     }
+                    this.restartTimeout = null; // Clear timeout after execution
+                    this.isAutoRestarting = false; // Clear auto-restart flag
                 }, 100);
             }
         };
@@ -291,6 +305,19 @@ class VoiceInterfaceClient {
             console.log('[TTS] Voice changed to:', this.selectedVoice?.name || 'Default');
         });
         
+        // Language selection event listener
+        this.languageSelect.addEventListener('change', (e) => {
+            this.selectedLanguage = e.target.value;
+            console.log('[Speech] Language changed to:', this.selectedLanguage);
+            
+            // Update speech recognition language
+            if (this.recognition) {
+                this.recognition.lang = this.selectedLanguage;
+            }
+            
+            this.saveUserPreferences();
+        });
+        
         // Always-on toggle event listener
         this.alwaysOnToggle.addEventListener('click', () => {
             this.toggleAlwaysOnMode();
@@ -304,6 +331,16 @@ class VoiceInterfaceClient {
         // Stop AI on user speech toggle event listener
         this.stopAiOnUserSpeechToggle.addEventListener('click', () => {
             this.toggleStopAiOnUserSpeech();
+        });
+        
+        // Speech controls collapse/expand event listeners
+        this.speechControlsHeader.addEventListener('click', () => {
+            this.toggleSpeechControls();
+        });
+        
+        this.speechControlsToggle.addEventListener('click', (e) => {
+            e.stopPropagation(); // Prevent double trigger from header click
+            this.toggleSpeechControls();
         });
     }
     
@@ -409,8 +446,8 @@ class VoiceInterfaceClient {
     toggleListening() {
         if (!this.recognition) return;
         
-        if (this.alwaysOnMode) {
-            // In always-on mode, clicking the button should toggle always-on off
+        if (this.alwaysOnMode && this.isListening) {
+            // In always-on mode and currently listening, clicking should toggle always-on off
             this.toggleAlwaysOnMode();
             return;
         }
@@ -440,6 +477,7 @@ class VoiceInterfaceClient {
             clearTimeout(this.restartTimeout);
             this.restartTimeout = null;
         }
+        this.isAutoRestarting = false;
         
         this.recognition.stop();
     }
@@ -503,6 +541,11 @@ class VoiceInterfaceClient {
     
     updateStopAiOnUserSpeechUI() {
         this.stopAiOnUserSpeechToggle.classList.toggle('active', this.stopAiOnUserSpeech);
+    }
+    
+    toggleSpeechControls() {
+        this.speechControls.classList.toggle('collapsed');
+        console.log('[UI] Speech controls:', this.speechControls.classList.contains('collapsed') ? 'collapsed' : 'expanded');
     }
     
     ensureListeningActive() {
@@ -657,6 +700,14 @@ class VoiceInterfaceClient {
     }
     
     updateVoiceUI() {
+        console.log('[UI] updateVoiceUI called with state:', {
+            isListening: this.isListening,
+            alwaysOnMode: this.alwaysOnMode,
+            isSpeaking: this.isSpeaking,
+            pauseDuringSpeech: this.pauseDuringSpeech,
+            restartTimeout: !!this.restartTimeout
+        });
+        
         // If pause during speech is disabled and we're still listening, prioritize listening state
         if (this.isSpeaking && this.pauseDuringSpeech) {
             this.voiceBtn.classList.remove('listening');
@@ -677,12 +728,24 @@ class VoiceInterfaceClient {
             this.voiceStatus.classList.add('active');
         } else {
             if (this.alwaysOnMode) {
-                // In always-on mode, keep showing "Always Listening" even during brief restarts
-                this.voiceBtn.classList.add('listening');
-                this.voiceBtnText.textContent = 'Turn Off Always-On';
-                this.voiceText.textContent = 'Always Listening';
-                this.voiceBtn.disabled = false;
-                this.voiceStatus.classList.add('active');
+                // Check if we're auto-restarting vs genuinely not listening
+                if (this.isAutoRestarting) {
+                    // Auto-restarting - keep showing "Always Listening" to avoid flicker
+                    this.voiceBtn.classList.add('listening');
+                    this.voiceBtnText.textContent = 'Turn Off Always-On';
+                    this.voiceText.textContent = 'Always Listening';
+                    this.voiceBtn.disabled = false;
+                    this.voiceStatus.classList.add('active');
+                } else {
+                    // Genuinely not listening - show ready state
+                    this.voiceBtn.classList.remove('listening');
+                    this.voiceBtnText.textContent = 'Start Always-On';
+                    this.voiceText.textContent = 'Always-On Ready';
+                    this.speechDisplay.textContent = 'Click "Start Always-On" to begin continuous listening...';
+                    this.speechDisplay.classList.remove('active');
+                    this.voiceBtn.disabled = !this.isConnected;
+                    this.voiceStatus.classList.remove('active');
+                }
             } else {
                 // Normal mode - show inactive state
                 this.voiceBtn.classList.remove('listening');
@@ -839,6 +902,16 @@ class VoiceInterfaceClient {
                     console.log('[Preferences] Will load voice:', prefs.selectedVoiceURI);
                 }
                 
+                // Load selected language
+                if (prefs.selectedLanguage) {
+                    this.selectedLanguage = prefs.selectedLanguage;
+                    this.languageSelect.value = prefs.selectedLanguage;
+                    if (this.recognition) {
+                        this.recognition.lang = this.selectedLanguage;
+                    }
+                    console.log('[Preferences] Loaded language:', prefs.selectedLanguage);
+                }
+                
                 // Load always-on mode preference
                 if (prefs.alwaysOnMode !== undefined) {
                     this.alwaysOnMode = prefs.alwaysOnMode;
@@ -885,6 +958,7 @@ class VoiceInterfaceClient {
             const prefs = {
                 speechSpeed: parseFloat(this.speedSlider.value),
                 selectedVoiceURI: this.selectedVoice ? this.selectedVoice.voiceURI : null,
+                selectedLanguage: this.selectedLanguage,
                 alwaysOnMode: this.alwaysOnMode,
                 pauseDuringSpeech: this.pauseDuringSpeech,
                 stopAiOnUserSpeech: this.stopAiOnUserSpeech,
