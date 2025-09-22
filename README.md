@@ -1,231 +1,132 @@
 # MCP Voice Interface
 
-Browser-based voice input/output for AI Assistant conversations via MCP (Model Context Protocol).
-
-**Talk to AI coding assistants using your voice** - Compatible with Claude Code CLI, OpenCode, and other AI development tools. Enables hands-free coding conversations and voice-driven development workflows.
-
-**Remote Voice Access** - Use your phone, tablet, or any device with a browser to talk to AI assistants running on your computer. Perfect for mobile coding discussions, reviewing code from anywhere, or continuing conversations away from your desk.
+Talk to AI assistants using your voice through a web browser. Compatible with Claude Desktop, OpenCode, and other MCP-enabled AI tools.
 
 ## Features
 
-- 🎤 **Voice Input**: Browser-based speech recognition
-- 🔊 **Voice Output**: Text-to-speech with multiple voice options  
-- ⚡ **Speed Control**: Adjustable speech speed (0.5x - 2.0x)
-- 🎛️ **Voice Selection**: Choose from available system voices
-- 🔴 **Always-On Mode**: Keep microphone continuously active for hands-free operation
-- 📱 **Remote Access**: Talk to AI assistants from your phone/tablet while they run on your computer
-- 💾 **Preferences**: Automatic saving of user settings
-- 🧪 **Test Voice**: Built-in voice testing functionality
-- 🔄 **Smart Listening**: Automatic pause during AI speech
+🎙️ **Voice Conversations** - Speak naturally with AI assistants  
+🌍 **30+ Languages** - Speech recognition in multiple languages  
+📱 **Remote Access** - Use from phone/tablet while AI runs on computer  
+⚙️ **Smart Controls** - Collapsible settings, always-on mode, custom voices  
+⏱️ **Dynamic Timeouts** - Intelligent wait times based on response length  
 
-## Installation & Usage
+## Easy Installation
 
-### Quick Start
+### 🚀 One-Command Setup
 
-```bash
-# Run the MCP server directly
-npx mcp-voice-interface
-
-# Show help
-npx mcp-voice-interface --help
-```
-
-### Setup for Claude Desktop
-
+**Claude Desktop:**
 ```bash
 npx mcp-voice-interface --install-claude-config
+# Restart Claude Desktop and you're ready!
 ```
 
-Then restart Claude Desktop app.
-
-### Setup for OpenCode
-
+**OpenCode (in current project):**
 ```bash
-# Install in current project directory
 npx mcp-voice-interface --install-opencode-config --local
-
-# Install globally 
-npx mcp-voice-interface --install-opencode-config --global
+# Start OpenCode and use the converse tool
 ```
 
-### Setup for Claude Code CLI
-
+**Claude Code CLI:**
 ```bash
-# Install in current project directory
 npx mcp-voice-interface --install-claude-code-config --local
-
-# Install globally 
-npx mcp-voice-interface --install-claude-code-config --global
+# Start Claude Code CLI and use voice tools
 ```
 
-### OpenCode Plugin
+### 📦 Manual Installation
 
-For enhanced integration with OpenCode, install the companion plugin:
-
+**From NPM:**
 ```bash
-# Install plugin in current project (recommended)
-npx mcp-voice-interface --install-opencode-plugin --local
-
-# Install plugin globally
-npx mcp-voice-interface --install-opencode-plugin --global
+npm install -g mcp-voice-interface
+mcp-voice-interface
 ```
 
-The plugin enables voice message forwarding to OpenCode sessions even when they're busy. Messages are consumed after forwarding to prevent duplicate processing.
-
-You can also manually build and install from the `opencode-plugin/` folder:
+**From Source:**
 ```bash
-cd opencode-plugin
-./build.sh
+git clone <repository-url>
+cd mcp-voice-interface
+npm install && npm run build && npm start
 ```
 
-## Usage in AI Conversations
+## How to Use
 
-### Voice Conversation Tool
+1. **Start the server** - Run `mcp-voice-interface`
+2. **Open browser** - Visit `https://localhost:5114` (opens automatically)
+3. **Allow microphone** - Grant permissions when prompted
+4. **Start talking** - Use the `converse` tool in your AI assistant
 
-Use the `converse` tool for bidirectional voice conversations:
+### Voice Commands in AI Chat
 
 ```
-converse("Hello! How can I help you today?")
+Use the converse tool to start talking:
+- converse("Hello! How can I help you today?", timeout: 35)
 ```
-
-### Other Available Tools
-
-- `speak("text")` - One-way text-to-speech
-- `voice_status()` - Check voice system status  
-- `get_voice_input()` - Get pending voice input
-
-### Voice Conversation Prompt
-
-Use the `converse` prompt to start a voice conversation mode where the AI will only respond using voice.
 
 ## Browser Interface
 
-When the MCP server runs, it starts both HTTP and HTTPS servers and automatically opens the HTTPS interface:
+The web interface provides:
 
-- **HTTPS**: `https://<MACHINE_IP>:5114` (auto-opens, **required for microphone access**)
-- **HTTP**: `http://localhost:5113` (only for use on same machine)
+- **Voice Settings** (click ⚙️ to expand)
+  - Language selection (30+ options)
+  - Voice selection
+  - Speech speed control
+  - Always-on microphone mode
+- **Smart Controls**
+  - Pause during AI speech (prevents echo)
+  - Stop AI when user speaks (natural conversation)
+- **Mobile Friendly** - Works on phones and tablets
 
-The browser interface includes:
+## Remote Access
 
-- **Voice Controls**: Start/stop listening with always-on mode option
-- **Speed Slider**: Adjust speech speed  
-- **Voice Selection**: Choose from available voices
-- **Test Voice**: Verify your settings
-- **Live Display**: See what the AI is saying
-- **Voice Queue**: View recent voice interactions
+Access from any device on your network:
 
-### Remote Access from Mobile Devices
+1. Find your computer's IP: `ifconfig | grep inet` (Mac/Linux) or `ipconfig` (Windows)
+2. Visit `https://YOUR_IP:5114` on your phone/browser
+3. Accept the security warning (self-signed certificate)
+4. Grant microphone permissions
 
-Access the voice interface from any device on your network:
+Perfect for continuing conversations away from your desk!
 
-1. **Find your computer's IP address**: 
-   - macOS/Linux: `ifconfig | grep inet`
-   - Windows: `ipconfig`
+## Configuration
 
-2. **Connect from mobile device**:
-   - Visit `https://YOUR_COMPUTER_IP:5114` on your phone/tablet
-   - Accept the self-signed certificate warning (click "Advanced" → "Proceed")
-   - Enable microphone permissions when prompted
-   - Talk to AI assistants running on your computer remotely
+### Environment Variables
 
-**Note**: HTTPS is required for microphone access on remote devices. The server generates self-signed certificates automatically.
+```bash
+export MCP_VOICE_AUTO_OPEN=false  # Disable auto-opening browser
+export MCP_VOICE_HTTPS_PORT=5114  # Change HTTPS port
+```
 
-Perfect for:
-- 📱 **Mobile code reviews** - Ask questions about code while away from desk
-- 🛋️ **Couch coding** - Continue development conversations from anywhere
-- 🚶 **Walking meetings** - Discuss architecture while taking a walk
-- 👥 **Team collaboration** - Share voice access with team members
+### Ports
 
-## Configuration Files
+- **HTTPS**: 5114 (required for microphone access)
+- **HTTP**: 5113 (local access only)
 
-### Claude Desktop
-- **Location**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- **Format**: Standard Claude Desktop MCP configuration
+## Requirements
 
-### OpenCode
-- **Location**: `opencode.json` in project directory (local) or home directory (global)
-- **Format**: OpenCode MCP configuration with `mcp` object and `type: "local"`
+- Node.js 18+
+- Modern browser (Chrome/Safari recommended)
+- Microphone access
 
-### Claude Code CLI
-- **Location**: `.mcp.json` in project directory (local) or home directory (global)  
-- **Format**: Claude Code CLI MCP configuration with `mcpServers` object
+## Troubleshooting
 
-## Environment Variables
+**Certificate warnings on mobile?**
+- Tap "Advanced" → "Proceed to site" to accept self-signed certificate
 
-- **`MCP_VOICE_AUTO_OPEN`**: Controls automatic browser opening (default: `true`)
-  - Set to `false` to disable auto-opening: `MCP_VOICE_AUTO_OPEN=false`
-- **`MCP_VOICE_HTTP_PORT`**: HTTP server port (default: `5113`)
-- **`MCP_VOICE_HTTPS_PORT`**: HTTPS server port (default: `5114`)
+**Microphone not working?**
+- Ensure you're using HTTPS (not HTTP)
+- Check browser permissions
+- Try refreshing the page
 
-## Troubleshooting Remote Access
-
-### Certificate Warnings on Mobile Devices
-
-When accessing from phones/tablets, you'll see a security warning due to self-signed certificates:
-
-**Chrome/Safari on Mobile:**
-1. You'll see "Your connection is not private" or similar
-2. Tap "Advanced" or "Show Details"
-3. Tap "Proceed to [IP address]" or "Visit this unsafe site"
-4. The interface will load and request microphone permissions
-
-**Alternative Solutions:**
-- **Local network only**: The self-signed certificate approach works fine for local network access
-- **Production setup**: For internet access, consider using a reverse proxy with real SSL certificates
+**AI not responding to voice?**
+- Make sure the `converse` tool is being used (not just `speak`)
+- Check that timeouts are properly calculated
 
 ## Development
 
 ```bash
-# Install dependencies
 npm install
-
-# Build everything (plugin + main project)
 npm run build
-
-# Build only the OpenCode plugin
-npm run build:plugin
-
-# Build only the main MCP server
-npm run build:main
-
-# Clean all build artifacts
-npm run clean
-
-# Run in development mode
-npm run dev
-
-# Run the MCP server directly
-npm run mcp
-```
-
-### Build Process
-
-The build system handles both the main MCP server and the OpenCode plugin:
-
-1. **Plugin build**: Compiles TypeScript and creates bundled `plugin.js` for OpenCode
-2. **Main build**: Compiles the MCP server TypeScript code
-
-The plugin is built first since it's included in the npm package distribution.
-
-## Requirements
-
-- **Node.js**: 18.0.0 or higher
-- **Browser**: Chrome/Safari (for speech recognition)
-- **Platform**: macOS, Linux, Windows
-
-## CLI Options
-
-```
-npx mcp-voice-interface [options]
-
-Options:
-  --install-claude-config      Install configuration for Claude Desktop
-  --install-opencode-config    Install configuration for OpenCode/Claude Code  
-  --install-claude-code-config Install configuration for Claude Code CLI
-  --local                      Install config in current directory
-  --global                     Install config globally (for Claude Desktop)
-  --help, -h                   Show help message
-  --version, -v                Show version information
+npm run dev     # Watch mode
+npm run start   # Run server
 ```
 
 ## License
