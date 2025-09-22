@@ -23,6 +23,7 @@ npx mcp-voice-interface --install-claude-config
 **OpenCode (in current project):**
 ```bash
 npx mcp-voice-interface --install-opencode-config --local
+npx mcp-voice-interface --install-opencode-plugin --local
 # Start OpenCode and use the converse tool
 ```
 
