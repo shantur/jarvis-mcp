@@ -2,6 +2,7 @@
 
 import express from 'express';
 import cors from 'cors';
+import http from 'http';
 import https from 'https';
 import open from 'open';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -16,6 +17,12 @@ import {
 import { VoiceQueue } from './voice-queue.js';
 import { createBrowserInterface } from './browser-interface.js';
 import { CertificateManager } from './certificate-manager.js';
+
+const envSttMode = (process.env.MCP_VOICE_STT_MODE || 'browser').toLowerCase();
+const WHISPER_URL = process.env.MCP_VOICE_WHISPER_URL || '';
+const WHISPER_TOKEN = process.env.MCP_VOICE_WHISPER_TOKEN || '';
+const whisperConfigured = envSttMode === 'whisper' && WHISPER_URL.length > 0;
+const ACTIVE_STT_MODE = whisperConfigured ? 'whisper' : 'browser';
 
 // Global state
 const voiceQueue = new VoiceQueue();
@@ -85,6 +92,83 @@ createBrowserInterface(browserApp, voiceQueue, () => {
   browserConnected = false;
 });
 
+browserApp.get('/api/config', (_req, res) => {
+  res.json({
+    sttMode: ACTIVE_STT_MODE,
+    whisperConfigured,
+    whisperProxyPath: '/api/whisper/transcriptions'
+  });
+});
+
+browserApp.post('/api/whisper/transcriptions', (req, res) => {
+  if (!whisperConfigured) {
+    res.status(503).json({
+      error: 'Whisper server not configured. Set MCP_VOICE_STT_MODE=whisper and MCP_VOICE_WHISPER_URL.'
+    });
+    return;
+  }
+
+  let targetUrl: URL;
+  try {
+    targetUrl = new URL(WHISPER_URL);
+  } catch (error) {
+    res.status(500).json({
+      error: `Invalid MCP_VOICE_WHISPER_URL: ${WHISPER_URL}`
+    });
+    return;
+  }
+
+  const isHttpsTarget = targetUrl.protocol === 'https:';
+  const headers: http.OutgoingHttpHeaders = { ...req.headers };
+
+  delete headers['content-length'];
+  delete headers['Content-Length'];
+  delete headers['host'];
+  delete headers['Host'];
+
+  if (WHISPER_TOKEN) {
+    headers['Authorization'] = WHISPER_TOKEN.startsWith('Bearer ')
+      ? WHISPER_TOKEN
+      : `Bearer ${WHISPER_TOKEN}`;
+  }
+
+  headers['host'] = targetUrl.host;
+
+  const requestOptions: http.RequestOptions = {
+    protocol: targetUrl.protocol,
+    hostname: targetUrl.hostname,
+    port: targetUrl.port || (isHttpsTarget ? '443' : '80'),
+    method: 'POST',
+    path: `${targetUrl.pathname}${targetUrl.search}`,
+    headers
+  };
+
+  const targetModule = isHttpsTarget ? https : http;
+  const proxyReq = targetModule.request(requestOptions, (proxyRes) => {
+    res.writeHead(proxyRes.statusCode || 500, proxyRes.headers);
+    proxyRes.pipe(res, { end: true });
+  });
+
+  proxyReq.on('error', (error) => {
+    console.error('[Whisper] Proxy error:', error);
+    if (!res.headersSent) {
+      res.status(502).json({ error: 'Failed to reach Whisper server' });
+    } else {
+      res.end();
+    }
+  });
+
+  req.on('aborted', () => {
+    proxyReq.destroy();
+  });
+
+  res.on('close', () => {
+    proxyReq.destroy();
+  });
+
+  req.pipe(proxyReq, { end: true });
+});
+
 // Tool handler function
 async function handleToolCall(name: string, args: any) {
   switch (name) {
@@ -144,7 +228,8 @@ To start voice conversations:
 
 Current configuration:
 - HTTPS Port: ${HTTPS_PORT}
-- Auto-open browser: ${AUTO_OPEN_BROWSER ? 'enabled' : 'disabled'}`,
+- Auto-open browser: ${AUTO_OPEN_BROWSER ? 'enabled' : 'disabled'}
+- Speech-to-text mode: ${ACTIVE_STT_MODE === 'whisper' ? 'Whisper server proxy' : 'Browser Web Speech API'}${ACTIVE_STT_MODE === 'whisper' ? `\n- Whisper endpoint: ${WHISPER_URL}` : ''}`,
           }],
         };
       }
@@ -167,6 +252,7 @@ Current configuration:
 - Browser Interface: Running (${browserInterface.httpsUrl})
 - Browser Connected: ${browserConnected}
 - Pending Voice Input: ${status.pendingInputCount} messages
+- Speech-to-text mode: ${ACTIVE_STT_MODE === 'whisper' ? 'Whisper server proxy' : 'Browser Web Speech API'}${ACTIVE_STT_MODE === 'whisper' ? `\n- Whisper endpoint: ${WHISPER_URL}` : ''}
 ${status.pendingInput.length > 0 ? '\nPending messages:\n' + status.pendingInput.map((item: any) => `"${item.text}"`).join('\n') : ''}`,
         }],
       };

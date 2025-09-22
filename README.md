@@ -71,6 +71,7 @@ The web interface provides:
   - Voice selection
   - Speech speed control
   - Always-on microphone mode
+  - Silence detection sensitivity & timeout (for Whisper streaming)
 - **Smart Controls**
   - Pause during AI speech (prevents echo)
   - Stop AI when user speaks (natural conversation)
@@ -94,7 +95,20 @@ Perfect for continuing conversations away from your desk!
 ```bash
 export MCP_VOICE_AUTO_OPEN=false  # Disable auto-opening browser
 export MCP_VOICE_HTTPS_PORT=5114  # Change HTTPS port
+export MCP_VOICE_STT_MODE=whisper  # Switch the web app to Whisper streaming
+export MCP_VOICE_WHISPER_URL=http://localhost:12017/v1/audio/transcriptions  # Whisper endpoint (full path)
+export MCP_VOICE_WHISPER_TOKEN=your_token  # Optional Bearer auth for Whisper server
 ```
+
+### Whisper Streaming Mode
+
+- Whisper mode records raw PCM in the browser, converts it to 16 kHz mono WAV, and streams it through the built-in HTTPS proxy, so the local `whisper-server` sees OpenAI-compatible requests.
+- The UI keeps recording while transcripts are in flight and ignores Whisper’s non-verbal tags (e.g. `[BLANK_AUDIO]`, `(typing)`), so only real speech is queued.
+- To enable it:
+  1. Run your Whisper server locally (e.g. `whisper-server` from `pfrankov/whisper-server`).
+  2. Set the environment variables above (`MCP_VOICE_STT_MODE=whisper` and the full `MCP_VOICE_WHISPER_URL`).
+  3. Restart `mcp-voice-interface` and hard-refresh the browser (empty-cache reload) to load the streaming bundle.
+  4. Voice status (`voice_status()` tool) now reports whether Whisper or browser STT is active.
 
 ### Ports
 

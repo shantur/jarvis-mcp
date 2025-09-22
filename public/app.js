@@ -28,6 +28,9 @@ class VoiceInterfaceClient {
         this.alwaysOnIndicator = document.getElementById('alwaysOnIndicator');
         this.pauseDuringSpeechToggle = document.getElementById('pauseDuringSpeechToggle');
         this.stopAiOnUserSpeechToggle = document.getElementById('stopAiOnUserSpeechToggle');
+        this.silenceThresholdSlider = document.getElementById('silenceThresholdSlider');
+        this.silenceThresholdValue = document.getElementById('silenceThresholdValue');
+        this.silenceDurationInput = document.getElementById('silenceDurationInput');
         this.speechControls = document.getElementById('speechControls');
         this.speechControlsHeader = document.getElementById('speechControlsHeader');
         this.speechControlsToggle = document.getElementById('speechControlsToggle');
@@ -62,17 +65,49 @@ class VoiceInterfaceClient {
         // AI speech display timeout
         this.aiSpeechHideTimeout = null;
         
-        this.initializeSpeechRecognition();
+        // Speech-to-text configuration
+        this.sttMode = 'browser';
+        this.whisperConfigured = false;
+        this.whisperProxyPath = '/api/whisper/transcriptions';
+        this.mediaRecorderSupported = typeof MediaRecorder !== 'undefined';
+        this.audioStream = null;
+        this.mediaRecorder = null;
+        this.mediaRecorderMimeType = null;
+        this.audioChunks = [];
+        this.audioContext = null;
+        this.audioAnalyser = null;
+        this.audioAnalyserData = null;
+        this.monitorSilenceRaf = null;
+        this.collectingAudio = false;
+        this.lastSpeechAt = 0;
+        this.silenceThreshold = 0.015; // Tuneable RMS threshold for voice activity
+        this.silenceDurationMs = 900;   // Consider silence if quiet for ~0.9s
+        this.isTranscribing = false;
+        this.lastWhisperTranscript = '';
+        this.pendingWhisperStop = false;
+        this.pendingUtterances = [];
+        this.scriptProcessor = null;
+        this.capturePCM = false;
+        this.pcmChunks = [];
+        this.zeroGainNode = null;
+        this.debugLastStream = null;
+        
         this.initializeEventSource();
         this.setupEventListeners();
         this.initializeTTS();
         this.loadUserPreferences();
+        this.updateSilenceControlsUI();
+        this.fetchServerConfig();
         
         // Auto-refresh status every 5 seconds
         setInterval(() => this.refreshStatus(), 5000);
     }
-    
+
     initializeSpeechRecognition() {
+        if (this.recognition) {
+            return;
+        }
+
         console.log('[Speech] Browser info:', {
             userAgent: navigator.userAgent,
             hasWebkitSpeech: 'webkitSpeechRecognition' in window,
@@ -224,6 +259,728 @@ class VoiceInterfaceClient {
             }
         };
     }
+
+    async fetchServerConfig() {
+        try {
+            const response = await fetch(`${this.baseUrl}/api/config`);
+            if (!response.ok) {
+                throw new Error(`Config request failed with status ${response.status}`);
+            }
+            const data = await response.json();
+            this.sttMode = data.sttMode || 'browser';
+            this.whisperConfigured = !!data.whisperConfigured;
+            if (typeof data.whisperProxyPath === 'string') {
+                this.whisperProxyPath = data.whisperProxyPath;
+            }
+        } catch (error) {
+            console.error('[Config] Failed to load server config, falling back to browser STT:', error);
+            this.sttMode = 'browser';
+            this.whisperConfigured = false;
+        }
+
+        const whisperSupported = this.mediaRecorderSupported && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+        if (this.sttMode === 'whisper' && (!this.whisperConfigured || !whisperSupported)) {
+            console.warn('[Config] Whisper mode requested but not supported in browser, using Web Speech API');
+            this.sttMode = 'browser';
+        }
+
+        if (this.sttMode === 'whisper') {
+            await this.initializeWhisperResources();
+        } else {
+            this.initializeSpeechRecognition();
+        }
+
+        this.updateVoiceUI();
+    }
+
+    async initializeWhisperResources() {
+        if (!this.mediaRecorderSupported) {
+            console.error('[Whisper] MediaRecorder not supported in this browser');
+            this.speechDisplay.textContent = 'Streaming transcription requires a modern browser with MediaRecorder support.';
+            this.sttMode = 'browser';
+            this.initializeSpeechRecognition();
+            return;
+        }
+
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            console.error('[Whisper] getUserMedia not available');
+            this.speechDisplay.textContent = 'Microphone access is required for streaming transcription.';
+            this.sttMode = 'browser';
+            this.initializeSpeechRecognition();
+            return;
+        }
+
+        if (this.audioStream) {
+            // Already initialised
+            this.setupMediaRecorder();
+            return;
+        }
+
+        try {
+            this.audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            console.log('[Whisper] Microphone stream acquired');
+        } catch (error) {
+            console.error('[Whisper] Failed to get microphone stream:', error);
+            this.speechDisplay.textContent = 'Unable to access microphone for streaming transcription.';
+            this.sttMode = 'browser';
+            this.initializeSpeechRecognition();
+            return;
+        }
+
+        try {
+            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+            this.audioContext = new AudioCtx();
+            const source = this.audioContext.createMediaStreamSource(this.audioStream);
+            this.audioAnalyser = this.audioContext.createAnalyser();
+            this.audioAnalyser.fftSize = 2048;
+            this.audioAnalyserData = new Float32Array(this.audioAnalyser.fftSize);
+            source.connect(this.audioAnalyser);
+            this.setupPcmCapture(source);
+            console.log('[Whisper] Audio analyser initialised');
+        } catch (error) {
+            console.error('[Whisper] Failed to initialise audio analyser:', error);
+            // We can still run without VAD but will rely on manual stop
+            this.audioAnalyser = null;
+        }
+
+        this.setupMediaRecorder();
+    }
+
+    setupMediaRecorder() {
+        if (!this.audioStream || this.mediaRecorder) {
+            return;
+        }
+
+        const candidates = [
+            'audio/webm;codecs=opus',
+            'audio/webm',
+            'audio/ogg;codecs=opus',
+            'audio/ogg'
+        ];
+
+        const supportedType = candidates.find(type => {
+            try {
+                return MediaRecorder.isTypeSupported(type);
+            } catch {
+                return false;
+            }
+        }) || '';
+
+        const options = supportedType ? { mimeType: supportedType } : undefined;
+        this.mediaRecorderMimeType = supportedType || '';
+
+        try {
+            this.mediaRecorder = options ? new MediaRecorder(this.audioStream, options) : new MediaRecorder(this.audioStream);
+            console.log('[Whisper] MediaRecorder initialised with type:', this.mediaRecorder.mimeType);
+        } catch (error) {
+            console.error('[Whisper] Failed to create MediaRecorder:', error);
+            this.speechDisplay.textContent = 'Unable to start streaming transcription.';
+            this.mediaRecorder = null;
+            this.sttMode = 'browser';
+            this.initializeSpeechRecognition();
+            return;
+        }
+
+        this.mediaRecorder.addEventListener('dataavailable', (event) => {
+            if (!this.collectingAudio) {
+                return;
+            }
+            if (event.data && event.data.size > 0) {
+                this.audioChunks.push(event.data);
+            }
+        });
+
+        this.mediaRecorder.addEventListener('stop', () => {
+            const chunkCount = this.audioChunks.length;
+            this.collectingAudio = false;
+            if (!this.pendingWhisperStop) {
+                this.audioChunks = [];
+                if (this.isListening) {
+                    this.startMediaRecorderLoop();
+                }
+                return;
+            }
+            this.pendingWhisperStop = false;
+            const type = this.mediaRecorderMimeType || this.mediaRecorder?.mimeType || 'audio/webm';
+            const fallbackBlob = new Blob(this.audioChunks, { type });
+            this.audioChunks = [];
+            const finishUtterance = async () => {
+                let wavBlob = null;
+                try {
+                    wavBlob = await this.exportRecordedWav();
+                } catch (error) {
+                    console.error('[Whisper] Failed to export PCM recording:', error);
+                }
+
+                if (!wavBlob || wavBlob.size === 0) {
+                    if (fallbackBlob.size > 0 && chunkCount > 0) {
+                        this.enqueueUtterance(fallbackBlob);
+                    } else {
+                        console.warn('[Whisper] No audio captured for utterance');
+                        this.speechDisplay.textContent = 'No speech detected.';
+                        this.speechDisplay.classList.remove('active');
+                    }
+                } else {
+                    this.enqueueUtterance(wavBlob);
+                }
+
+                if (this.isListening) {
+                    this.startMediaRecorderLoop();
+                }
+            };
+
+            finishUtterance().catch((error) => {
+                console.error('[Whisper] Failed to process utterance:', error);
+                if (this.isListening) {
+                    this.startMediaRecorderLoop();
+                }
+            });
+        });
+
+        this.mediaRecorder.addEventListener('error', (event) => {
+            console.error('[Whisper] MediaRecorder error:', event.error);
+        });
+    }
+
+    setupPcmCapture(source) {
+        try {
+            const bufferSize = 4096;
+            this.scriptProcessor = this.audioContext.createScriptProcessor(bufferSize, 1, 1);
+            source.connect(this.scriptProcessor);
+            this.zeroGainNode = this.audioContext.createGain();
+            this.zeroGainNode.gain.value = 0;
+            this.scriptProcessor.connect(this.zeroGainNode);
+            this.zeroGainNode.connect(this.audioContext.destination);
+            this.scriptProcessor.onaudioprocess = (event) => {
+                if (!this.capturePCM) {
+                    return;
+                }
+                const input = event.inputBuffer.getChannelData(0);
+                this.pcmChunks.push(new Float32Array(input));
+            };
+            console.log('[Whisper] PCM capture initialised');
+        } catch (error) {
+            console.error('[Whisper] Failed to initialise PCM capture:', error);
+            this.scriptProcessor = null;
+            this.zeroGainNode = null;
+        }
+    }
+
+    startMediaRecorderLoop() {
+        if (!this.mediaRecorder) {
+            return;
+        }
+
+        if (this.audioContext && this.audioContext.state === 'suspended') {
+            this.audioContext.resume().catch(() => {});
+        }
+
+        if (this.mediaRecorder.state === 'recording') {
+            return;
+        }
+
+        this.audioChunks = [];
+        this.collectingAudio = false;
+        this.lastSpeechAt = 0;
+        try {
+            this.mediaRecorder.start(250);
+            console.log('[Whisper] MediaRecorder loop started');
+        } catch (error) {
+            console.error('[Whisper] Failed to start MediaRecorder:', error);
+            return;
+        }
+
+        if (!this.monitorSilenceRaf) {
+            this.monitorWhisperSilence();
+        }
+    }
+
+    monitorWhisperSilence() {
+        if (this.sttMode !== 'whisper' || !this.isListening) {
+            this.monitorSilenceRaf = null;
+            return;
+        }
+
+        if (!this.audioAnalyser || !this.audioAnalyserData) {
+            this.monitorSilenceRaf = requestAnimationFrame(() => this.monitorWhisperSilence());
+            return;
+        }
+
+        this.audioAnalyser.getFloatTimeDomainData(this.audioAnalyserData);
+        let sumSquares = 0;
+        for (let i = 0; i < this.audioAnalyserData.length; i++) {
+            const sample = this.audioAnalyserData[i];
+            sumSquares += sample * sample;
+        }
+        const rms = Math.sqrt(sumSquares / this.audioAnalyserData.length);
+        const now = performance.now();
+
+        if (rms > this.silenceThreshold) {
+            if (!this.collectingAudio) {
+                console.log('[Whisper] Voice detected - starting utterance capture');
+                this.collectingAudio = true;
+                this.audioChunks = [];
+                this.speechDisplay.textContent = 'Listening...';
+                this.speechDisplay.classList.add('active');
+                this.startPcmCapture();
+            }
+            this.lastSpeechAt = now;
+        } else if (this.collectingAudio) {
+            if (!this.lastSpeechAt) {
+                this.lastSpeechAt = now;
+            }
+            if (now - this.lastSpeechAt > this.silenceDurationMs && !this.pendingWhisperStop) {
+                console.log('[Whisper] Silence detected - finishing utterance');
+                this.pendingWhisperStop = true;
+                this.stopPcmCapture();
+                if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
+                    try {
+                        this.mediaRecorder.requestData();
+                    } catch (error) {
+                        console.warn('[Whisper] requestData failed:', error);
+                    }
+                    this.mediaRecorder.stop();
+                }
+            }
+        }
+
+        this.monitorSilenceRaf = requestAnimationFrame(() => this.monitorWhisperSilence());
+    }
+
+    startWhisperListening() {
+        if (!this.mediaRecorder) {
+            this.setupMediaRecorder();
+        }
+
+        if (!this.mediaRecorder) {
+            this.speechDisplay.textContent = 'Streaming transcription not available.';
+            return;
+        }
+
+        if (this.isListening) {
+            return;
+        }
+
+        this.isListening = true;
+        this.pendingUtterances = [];
+        this.collectingAudio = false;
+        this.pendingWhisperStop = false;
+        this.lastSpeechAt = 0;
+        this.capturePCM = false;
+        this.pcmChunks = [];
+        this.setVoiceState(true);
+        this.startMediaRecorderLoop();
+        this.updateVoiceUI();
+    }
+
+    stopWhisperListening(pauseOnly = false) {
+        if (this.isListening || pauseOnly) {
+            this.isListening = false;
+        }
+
+        if (!pauseOnly && !this.alwaysOnMode) {
+            this.setVoiceState(false);
+        }
+
+        this.collectingAudio = false;
+        this.pendingWhisperStop = false;
+        this.lastSpeechAt = 0;
+        this.stopPcmCapture();
+        this.pcmChunks = [];
+
+        if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
+            try {
+                this.mediaRecorder.stop();
+            } catch (error) {
+                console.warn('[Whisper] Failed to stop recorder:', error);
+            }
+        }
+
+        if (this.monitorSilenceRaf) {
+            cancelAnimationFrame(this.monitorSilenceRaf);
+            this.monitorSilenceRaf = null;
+        }
+
+        if (!pauseOnly) {
+            this.speechDisplay.textContent = 'Start speaking and your words will appear here...';
+            this.speechDisplay.classList.remove('active');
+        }
+
+        this.updateVoiceUI();
+    }
+
+    ensureWhisperListeningActive() {
+        setTimeout(() => {
+            if (this.sttMode !== 'whisper') {
+                return;
+            }
+            if (!this.isListening && (this.alwaysOnMode || this.wasListeningBeforeTTS)) {
+                console.log('[Whisper] Resuming listening after AI speech');
+                this.startListening();
+                return;
+            }
+            if (this.isListening && this.mediaRecorder && this.mediaRecorder.state !== 'recording') {
+                console.log('[Whisper] MediaRecorder inactive - restarting');
+                this.startMediaRecorderLoop();
+            }
+            if (this.isListening && !this.monitorSilenceRaf) {
+                this.monitorWhisperSilence();
+            }
+        }, 500);
+
+        setTimeout(() => {
+            if (this.sttMode !== 'whisper' || !this.isListening) {
+                return;
+            }
+            if (this.mediaRecorder && this.mediaRecorder.state !== 'recording') {
+                console.log('[Whisper] MediaRecorder still inactive - forcing restart');
+                this.startMediaRecorderLoop();
+            }
+        }, 2000);
+    }
+
+    enqueueUtterance(blob) {
+        if (!blob || blob.size === 0) {
+            return;
+        }
+
+        this.pendingUtterances.push(blob);
+        this.processUtteranceQueue().catch((error) => {
+            console.error('[Whisper] Failed to process utterance queue:', error);
+        });
+    }
+
+    async processUtteranceQueue() {
+        if (this.isTranscribing) {
+            return;
+        }
+
+        const nextBlob = this.pendingUtterances.shift();
+        if (!nextBlob) {
+            return;
+        }
+
+        this.isTranscribing = true;
+        this.lastWhisperTranscript = '';
+        this.speechDisplay.textContent = 'Transcribing with Whisper...';
+        this.speechDisplay.classList.add('active');
+
+        let wavBlob = nextBlob;
+        let originalType = wavBlob.type || this.mediaRecorderMimeType || 'audio/webm';
+        if (wavBlob.type !== 'audio/wav') {
+            try {
+                wavBlob = await this.convertBlobToWav(nextBlob);
+                originalType = nextBlob.type || wavBlob.type || originalType;
+            } catch (error) {
+                console.error('[Whisper] Failed to convert audio to WAV, using original blob:', error);
+            }
+        }
+
+        try {
+            const transcriptBlob = await this.streamWhisperTranscription(wavBlob, originalType);
+            if (transcriptBlob) {
+                this.debugLastStream = transcriptBlob;
+            }
+        } catch (error) {
+            console.error('[Whisper] Transcription failed:', error);
+            this.speechDisplay.textContent = 'Whisper transcription failed. Check server logs and try again.';
+        } finally {
+            this.isTranscribing = false;
+            if (this.pendingUtterances.length > 0) {
+                this.processUtteranceQueue().catch((error) => {
+                    console.error('[Whisper] Failed to continue utterance queue:', error);
+                });
+            }
+        }
+    }
+
+    async streamWhisperTranscription(blob, originalType) {
+        const formData = new FormData();
+        const file = blob instanceof File
+            ? blob
+            : new File([blob], 'utterance.wav', { type: blob.type || 'audio/wav' });
+        if (file.size <= 44) {
+            console.warn('[Whisper] WAV appears empty, skipping');
+            this.speechDisplay.textContent = 'No speech detected.';
+            this.speechDisplay.classList.remove('active');
+            return;
+        }
+        console.log('[Whisper] Uploading file', { size: file.size, type: file.type, originalType });
+        formData.append('file', file, file.name);
+        formData.append('response_format', 'text');
+        formData.append('stream', 'true');
+        formData.append('temperature', '0');
+        if (this.selectedLanguage) {
+            formData.append('language', this.selectedLanguage.split('-')[0]);
+        }
+
+        const response = await fetch(this.whisperProxyPath, {
+            method: 'POST',
+            body: formData,
+            headers: {
+                Accept: 'text/event-stream'
+            }
+        });
+
+        if (!response.ok || !response.body) {
+            throw new Error(`Whisper server returned ${response.status}`);
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let buffer = '';
+        let streamEnded = false;
+        const streamChunks = [];
+
+        while (!streamEnded) {
+            const { value, done } = await reader.read();
+            if (done) {
+                break;
+            }
+
+            if (value) {
+                streamChunks.push(value);
+            }
+
+            buffer += decoder.decode(value || new Uint8Array(), { stream: true });
+
+            let delimiter = this.findSseDelimiter(buffer);
+            while (delimiter) {
+                const rawEvent = buffer.slice(0, delimiter.index);
+                buffer = buffer.slice(delimiter.index + delimiter.length);
+                const shouldEnd = this.processWhisperEvent(rawEvent);
+                if (shouldEnd) {
+                    streamEnded = true;
+                    try {
+                        reader.cancel();
+                    } catch (error) {
+                        console.warn('[Whisper] Failed to cancel reader:', error);
+                    }
+                    break;
+                }
+                delimiter = this.findSseDelimiter(buffer);
+            }
+        }
+
+        // Flush remaining decoder buffer
+        buffer += decoder.decode();
+
+        if (!streamEnded && buffer.trim().length > 0) {
+            const shouldEnd = this.processWhisperEvent(buffer.trim());
+            if (!shouldEnd) {
+                // Server closed without explicit end event; treat remaining text as final
+                this.handleWhisperFinal(buffer.trim());
+            }
+        }
+
+        return streamChunks.length > 0
+            ? new Blob(streamChunks.map(chunk => new Uint8Array(chunk)), { type: 'text/plain' })
+            : null;
+    }
+
+    findSseDelimiter(buffer) {
+        if (!buffer) {
+            return null;
+        }
+
+        const candidates = [
+            { index: buffer.indexOf('\r\n\r\n'), length: 4 },
+            { index: buffer.indexOf('\n\n'), length: 2 },
+            { index: buffer.indexOf('\r\r'), length: 2 }
+        ].filter(item => item.index !== -1);
+
+        if (candidates.length === 0) {
+            return null;
+        }
+
+        candidates.sort((a, b) => a.index - b.index);
+        return candidates[0];
+    }
+
+    processWhisperEvent(rawEvent) {
+        if (!rawEvent || rawEvent.trim().length === 0) {
+            return false;
+        }
+
+        const normalized = rawEvent.replace(/\r/g, '');
+        const lines = normalized.split('\n');
+        let eventType = 'message';
+        const dataLines = [];
+
+        for (const line of lines) {
+            if (line.startsWith('event:')) {
+                eventType = line.slice(6).trim();
+            } else if (line.startsWith('data:')) {
+                dataLines.push(line.slice(5).trimStart());
+            } else if (!line.includes(':')) {
+                // Chunked fallback without SSE headers
+                dataLines.push(line.trim());
+            }
+        }
+
+        const data = dataLines.join('\n').trim();
+
+        if (eventType === 'end') {
+            const finalText = data || this.lastWhisperTranscript;
+            this.handleWhisperFinal(finalText);
+            return true;
+        }
+
+        if (data.length === 0) {
+            return false;
+        }
+
+        this.handleWhisperPartial(data);
+        return false;
+    }
+
+    async convertBlobToWav(blob) {
+        const arrayBuffer = await blob.arrayBuffer();
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        const tempCtx = new AudioCtx();
+        const audioBuffer = await tempCtx.decodeAudioData(arrayBuffer.slice(0));
+        await tempCtx.close();
+        return await this.audioBufferToFile(audioBuffer);
+    }
+
+    startPcmCapture() {
+        if (!this.scriptProcessor) {
+            return;
+        }
+        this.capturePCM = true;
+        this.pcmChunks = [];
+    }
+
+    stopPcmCapture() {
+        this.capturePCM = false;
+    }
+
+    async exportRecordedWav() {
+        if (!this.pcmChunks.length || !this.audioContext) {
+            return null;
+        }
+
+        const sampleRate = this.audioContext.sampleRate;
+        const totalLength = this.pcmChunks.reduce((sum, chunk) => sum + chunk.length, 0);
+        const buffer = this.audioContext.createBuffer(1, totalLength, sampleRate);
+        const channel = buffer.getChannelData(0);
+        let offset = 0;
+        for (const chunk of this.pcmChunks) {
+            channel.set(chunk, offset);
+            offset += chunk.length;
+        }
+        this.pcmChunks = [];
+
+        return await this.audioBufferToFile(buffer);
+    }
+
+    async audioBufferToFile(audioBuffer) {
+        if (typeof window.audioBufferToWav !== 'function') {
+            throw new Error('audioBufferToWav library not loaded');
+        }
+
+        let workingBuffer = audioBuffer;
+        if (workingBuffer.numberOfChannels > 1) {
+            workingBuffer = this.downmixToMono(workingBuffer);
+        }
+
+        if (workingBuffer.sampleRate !== 16000) {
+            workingBuffer = await this.resampleBuffer(workingBuffer, 16000);
+        }
+
+        const wavArrayBuffer = window.audioBufferToWav(workingBuffer, { float32: false });
+        return new File([new Uint8Array(wavArrayBuffer)], 'utterance.wav', { type: 'audio/wav' });
+    }
+
+    downmixToMono(audioBuffer) {
+        if (audioBuffer.numberOfChannels === 1) {
+            return audioBuffer;
+        }
+
+        const frameCount = audioBuffer.length;
+        const sampleRate = audioBuffer.sampleRate;
+        const monoBuffer = new AudioBuffer({ length: frameCount, numberOfChannels: 1, sampleRate });
+        const output = monoBuffer.getChannelData(0);
+
+        const channelData = [];
+        for (let channel = 0; channel < audioBuffer.numberOfChannels; channel++) {
+            channelData.push(audioBuffer.getChannelData(channel));
+        }
+
+        for (let i = 0; i < frameCount; i++) {
+            let sum = 0;
+            for (let channel = 0; channel < channelData.length; channel++) {
+                sum += channelData[channel][i];
+            }
+            output[i] = sum / channelData.length;
+        }
+
+        return monoBuffer;
+    }
+
+    async resampleBuffer(audioBuffer, targetSampleRate) {
+        const offlineCtx = new OfflineAudioContext(1, Math.ceil(audioBuffer.duration * targetSampleRate), targetSampleRate);
+        const bufferSource = offlineCtx.createBufferSource();
+        bufferSource.buffer = audioBuffer;
+        bufferSource.connect(offlineCtx.destination);
+        bufferSource.start(0);
+        return await offlineCtx.startRendering();
+    }
+
+    handleWhisperPartial(text) {
+        const cleaned = this.cleanTranscript(text);
+        if (!cleaned) {
+            return;
+        }
+
+        this.lastWhisperTranscript = cleaned;
+        this.currentSessionTranscript = cleaned;
+        this.speechDisplay.textContent = cleaned;
+        this.speechDisplay.classList.add('active');
+    }
+
+    handleWhisperFinal(text) {
+        const cleaned = this.cleanTranscript(text || this.lastWhisperTranscript || '');
+        if (!cleaned) {
+            this.speechDisplay.textContent = 'No speech detected.';
+            this.speechDisplay.classList.remove('active');
+            return;
+        }
+
+        this.speechDisplay.textContent = cleaned;
+        this.speechDisplay.classList.add('active');
+        this.currentSessionTranscript = cleaned;
+        this.sendVoiceInput(cleaned);
+    }
+
+    cleanTranscript(text) {
+        if (!text) {
+            return '';
+        }
+
+        const trimmed = text.trim();
+        if (!trimmed) {
+            return '';
+        }
+
+        const normalized = trimmed.toUpperCase();
+        if (/^\[[A-Z_ ]+\]$/.test(normalized)) {
+            return '';
+        }
+
+        // Remove bracketed placeholders anywhere in the text (both upper and lower case variants)
+        const cleaned = trimmed
+            .replace(/\[[^\]]*\]/g, ' ')
+            .replace(/\([^)]*\)/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+
+        if (!cleaned) {
+            return '';
+        }
+
+        return cleaned;
+    }
     
     initializeEventSource() {
         if (this.eventSource) {
@@ -296,7 +1053,33 @@ class VoiceInterfaceClient {
             this.saveUserPreferences();
             console.log('[TTS] Speed changed to:', speed);
         });
-        
+
+        if (this.silenceThresholdSlider) {
+            this.silenceThresholdSlider.addEventListener('input', (e) => {
+                const value = parseFloat(e.target.value);
+                if (!Number.isNaN(value)) {
+                    this.silenceThreshold = value;
+                    this.updateSilenceControlsUI();
+                    this.saveUserPreferences();
+                }
+            });
+        }
+
+        if (this.silenceDurationInput) {
+            const handleDurationChange = (e) => {
+                let value = parseInt(e.target.value, 10);
+                if (Number.isNaN(value)) {
+                    value = this.silenceDurationMs;
+                }
+                value = Math.max(300, Math.min(3000, value));
+                this.silenceDurationMs = value;
+                this.updateSilenceControlsUI();
+                this.saveUserPreferences();
+            };
+            this.silenceDurationInput.addEventListener('change', handleDurationChange);
+            this.silenceDurationInput.addEventListener('input', handleDurationChange);
+        }
+
         // Voice selection event listener
         this.voiceSelect.addEventListener('change', (e) => {
             const voiceURI = e.target.value;
@@ -376,16 +1159,22 @@ class VoiceInterfaceClient {
             console.warn('[API] Invalid voice input, skipping:', { text, type: typeof text, trimmed: text?.trim() });
             return;
         }
-        
-        console.log('[API] Sending voice input:', text);
-        
+
+        const cleaned = this.cleanTranscript(text);
+        if (!cleaned) {
+            console.log('[API] Ignoring placeholder transcript:', text);
+            return;
+        }
+
+        console.log('[API] Sending voice input:', cleaned);
+
         try {
             const response = await fetch(`${this.baseUrl}/api/voice-input`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ text: text.trim() }),
+                body: JSON.stringify({ text: cleaned }),
             });
             
             const data = await response.json();
@@ -444,41 +1233,62 @@ class VoiceInterfaceClient {
     }
     
     toggleListening() {
-        if (!this.recognition) return;
-        
         if (this.alwaysOnMode && this.isListening) {
             // In always-on mode and currently listening, clicking should toggle always-on off
             this.toggleAlwaysOnMode();
             return;
         }
-        
+
         if (this.isListening) {
             this.stopListening();
         } else {
             this.startListening();
         }
     }
-    
+
     startListening() {
-        if (!this.recognition || this.isListening) return;
-        
+        if (this.isListening) {
+            return;
+        }
+
+        if (this.sttMode === 'whisper') {
+            this.startWhisperListening();
+            return;
+        }
+
+        if (!this.recognition) {
+            console.warn('[Speech] Recognition object missing');
+            return;
+        }
+
         try {
             this.recognition.start();
         } catch (error) {
             console.error('[Speech] Failed to start recognition:', error);
         }
     }
-    
-    stopListening() {
-        if (!this.recognition || !this.isListening) return;
-        
+
+    stopListening(pauseOnly = false) {
+        if (!this.isListening && this.sttMode !== 'whisper') {
+            return;
+        }
+
+        if (this.sttMode === 'whisper') {
+            this.stopWhisperListening(pauseOnly);
+            return;
+        }
+
+        if (!this.recognition || !this.isListening) {
+            return;
+        }
+
         // Clear any pending restart timeout
         if (this.restartTimeout) {
             clearTimeout(this.restartTimeout);
             this.restartTimeout = null;
         }
         this.isAutoRestarting = false;
-        
+
         this.recognition.stop();
     }
     
@@ -527,7 +1337,7 @@ class VoiceInterfaceClient {
     updatePauseDuringSpeechUI() {
         this.pauseDuringSpeechToggle.classList.toggle('active', this.pauseDuringSpeech);
     }
-    
+
     toggleStopAiOnUserSpeech() {
         this.stopAiOnUserSpeech = !this.stopAiOnUserSpeech;
         console.log('[Speech] Stop AI on user speech:', this.stopAiOnUserSpeech ? 'enabled' : 'disabled');
@@ -542,6 +1352,18 @@ class VoiceInterfaceClient {
     updateStopAiOnUserSpeechUI() {
         this.stopAiOnUserSpeechToggle.classList.toggle('active', this.stopAiOnUserSpeech);
     }
+
+    updateSilenceControlsUI() {
+        if (this.silenceThresholdSlider) {
+            this.silenceThresholdSlider.value = this.silenceThreshold.toFixed(3);
+        }
+        if (this.silenceThresholdValue) {
+            this.silenceThresholdValue.textContent = this.silenceThreshold.toFixed(3);
+        }
+        if (this.silenceDurationInput) {
+            this.silenceDurationInput.value = Math.round(this.silenceDurationMs);
+        }
+    }
     
     toggleSpeechControls() {
         this.speechControls.classList.toggle('collapsed');
@@ -549,6 +1371,11 @@ class VoiceInterfaceClient {
     }
     
     ensureListeningActive() {
+        if (this.sttMode === 'whisper') {
+            this.ensureWhisperListeningActive();
+            return;
+        }
+
         // When pause is disabled, aggressively ensure recognition stays active
         console.log('[Speech] Ensuring recognition stays active during AI speech');
         
@@ -596,7 +1423,7 @@ class VoiceInterfaceClient {
             // Stop listening while speaking to avoid echo/feedback (if enabled)
             if (this.isListening && this.pauseDuringSpeech) {
                 console.log('[TTS] Pausing listening during speech');
-                this.recognition.stop();
+                this.stopListening(true);
             } else if (this.isListening && !this.pauseDuringSpeech) {
                 console.log('[TTS] Keeping listening active during speech (pause disabled)');
                 // Ensure recognition stays active - restart it if needed
@@ -707,6 +1534,8 @@ class VoiceInterfaceClient {
             pauseDuringSpeech: this.pauseDuringSpeech,
             restartTimeout: !!this.restartTimeout
         });
+        const usingWhisper = this.sttMode === 'whisper';
+        const canStartWhisper = usingWhisper ? !!this.mediaRecorder : true;
         
         // If pause during speech is disabled and we're still listening, prioritize listening state
         if (this.isSpeaking && this.pauseDuringSpeech) {
@@ -719,41 +1548,48 @@ class VoiceInterfaceClient {
             this.voiceBtn.classList.add('listening');
             if (this.alwaysOnMode) {
                 this.voiceBtnText.textContent = 'Turn Off Always-On';
-                this.voiceText.textContent = 'Always Listening';
+                this.voiceText.textContent = usingWhisper ? 'Always Listening (Whisper)' : 'Always Listening';
             } else {
                 this.voiceBtnText.textContent = 'Stop Listening';
-                this.voiceText.textContent = 'Voice Active';
+                this.voiceText.textContent = usingWhisper ? 'Whisper Listening' : 'Voice Active';
             }
             this.voiceBtn.disabled = false;
             this.voiceStatus.classList.add('active');
         } else {
             if (this.alwaysOnMode) {
                 // Check if we're auto-restarting vs genuinely not listening
-                if (this.isAutoRestarting) {
+                if (this.isAutoRestarting && !usingWhisper) {
                     // Auto-restarting - keep showing "Always Listening" to avoid flicker
                     this.voiceBtn.classList.add('listening');
                     this.voiceBtnText.textContent = 'Turn Off Always-On';
-                    this.voiceText.textContent = 'Always Listening';
-                    this.voiceBtn.disabled = false;
+                    this.voiceText.textContent = usingWhisper ? 'Always Listening (Whisper)' : 'Always Listening';
+                    this.voiceBtn.disabled = !canStartWhisper;
                     this.voiceStatus.classList.add('active');
                 } else {
                     // Genuinely not listening - show ready state
                     this.voiceBtn.classList.remove('listening');
                     this.voiceBtnText.textContent = 'Start Always-On';
-                    this.voiceText.textContent = 'Always-On Ready';
-                    this.speechDisplay.textContent = 'Click "Start Always-On" to begin continuous listening...';
+                    this.voiceText.textContent = usingWhisper ? 'Always-On Ready (Whisper)' : 'Always-On Ready';
+                    this.speechDisplay.textContent = usingWhisper
+                        ? 'Click "Start Always-On" to begin Whisper streaming...'
+                        : 'Click "Start Always-On" to begin continuous listening...';
                     this.speechDisplay.classList.remove('active');
-                    this.voiceBtn.disabled = !this.isConnected;
+                    this.voiceBtn.disabled = !this.isConnected || !canStartWhisper;
                     this.voiceStatus.classList.remove('active');
                 }
             } else {
                 // Normal mode - show inactive state
                 this.voiceBtn.classList.remove('listening');
-                this.voiceBtnText.textContent = 'Start Listening';
-                this.voiceText.textContent = 'Voice Inactive';
-                this.speechDisplay.textContent = 'Start speaking and your words will appear here...';
+                this.voiceBtnText.textContent = usingWhisper ? 'Start Whisper' : 'Start Listening';
+                this.voiceText.textContent = usingWhisper ? 'Whisper Idle' : 'Voice Inactive';
+                this.speechDisplay.textContent = usingWhisper
+                    ? 'Start speaking and Whisper will transcribe your words...'
+                    : 'Start speaking and your words will appear here...';
                 this.speechDisplay.classList.remove('active');
-                this.voiceBtn.disabled = (this.isSpeaking && this.pauseDuringSpeech) ? true : !this.isConnected;
+                const disableButton = (this.isSpeaking && this.pauseDuringSpeech)
+                    ? true
+                    : (!this.isConnected || !canStartWhisper);
+                this.voiceBtn.disabled = disableButton;
                 this.voiceStatus.classList.remove('active');
             }
         }
@@ -932,6 +1768,20 @@ class VoiceInterfaceClient {
                     this.updateStopAiOnUserSpeechUI();
                     console.log('[Preferences] Loaded stop AI on user speech:', prefs.stopAiOnUserSpeech);
                 }
+
+                if (prefs.silenceThreshold !== undefined) {
+                    const value = parseFloat(prefs.silenceThreshold);
+                    if (!Number.isNaN(value)) {
+                        this.silenceThreshold = Math.min(0.1, Math.max(0.001, value));
+                    }
+                }
+
+                if (prefs.silenceDurationMs !== undefined) {
+                    const value = parseInt(prefs.silenceDurationMs, 10);
+                    if (!Number.isNaN(value)) {
+                        this.silenceDurationMs = Math.min(5000, Math.max(300, value));
+                    }
+                }
             }
         } catch (error) {
             console.error('[Preferences] Failed to load user preferences:', error);
@@ -962,6 +1812,8 @@ class VoiceInterfaceClient {
                 alwaysOnMode: this.alwaysOnMode,
                 pauseDuringSpeech: this.pauseDuringSpeech,
                 stopAiOnUserSpeech: this.stopAiOnUserSpeech,
+                silenceThreshold: this.silenceThreshold,
+                silenceDurationMs: this.silenceDurationMs,
             };
             
             localStorage.setItem('mcpVoicePreferences', JSON.stringify(prefs));
