@@ -1,6 +1,6 @@
 {
   "name": "mcp-voice-interface",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Browser-based voice input/output for AI Assistant conversations via MCP (Model Context Protocol)",
   "main": "dist/index.js",
   "type": "module",
