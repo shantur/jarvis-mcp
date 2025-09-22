@@ -193,7 +193,17 @@ ${status.pendingInput.length > 0 ? '\nPending messages:\n' + status.pendingInput
     case 'converse':
       const textToSpeak = args?.text as string;
       const waitForResponse = args?.wait_for_response !== false;
-      const timeout = (args?.timeout as number) || 30;
+      const timeout = args?.timeout as number;
+      
+      if (!timeout || typeof timeout !== 'number' || timeout <= 0) {
+        return {
+          content: [{
+            type: 'text',
+            text: 'Error: timeout parameter is required and must be a positive number representing seconds to wait for user response',
+          }],
+          isError: true,
+        };
+      }
 
       if (!textToSpeak?.trim()) {
         return {
@@ -412,11 +422,10 @@ mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             timeout: {
               type: 'number',
-              description: 'Maximum time to wait for voice input in seconds (default: 30)',
-              default: 30,
+              description: 'REQUIRED: Time to wait for voice input in seconds. Calculate as: (estimated_speech_time + 30_seconds_buffer). For example: short responses ~5-10 seconds, medium responses ~15-25 seconds, long responses ~35-60 seconds. Always add 30 seconds for user thinking and response time.',
             },
           },
-          required: ['text'],
+          required: ['text', 'timeout'],
         },
       },
       {
@@ -468,8 +477,14 @@ mcpServer.setRequestHandler(GetPromptRequestSchema, async (request) => {
       "Continue the conversation until the user indicates they want to end it",
       "If the user asks questions, respond using converse() with your answer", 
       "If the user gives commands, acknowledge using converse() and use other tools as needed",
-      "**IMPORTANT** DO NOT end coverstation until user asks you to end conversation, even if you don't get any response",
+      "**IMPORTANT** DO NOT end conversation until user asks you to end conversation, even if you don't get any response",
       "If you don't get any response first time, try again 2 times before ending the conversation below",
+      "**TIMEOUT CALCULATION**: Always calculate timeout based on your response length:",
+      "- Short responses (1-2 sentences): 35-40 seconds (5-10s speech + 30s buffer)",
+      "- Medium responses (3-5 sentences): 45-55 seconds (15-25s speech + 30s buffer)",
+      "- Long responses (6+ sentences): 60-90 seconds (30-60s speech + 30s buffer)",
+      "- Always add 30 seconds buffer for user thinking and response time",
+      "- Example: converse({text: 'Hello there!', timeout: 35}) for a short greeting",
       "When ending conversation:",
       "1. Call end_conversation tool with a good_bye message that will be spoken before closing",
       "2. Example: end_conversation({good_bye: 'Thank you for our conversation! Have a great day!'})",
