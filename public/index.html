@@ -260,6 +260,27 @@
             border-color: #007bff;
         }
 
+        .timeout-indicator {
+            margin-top: 6px;
+            text-align: center;
+            font-size: 24px;
+            color: #6c757d;
+            min-height: 30px;
+            letter-spacing: 0.015em;
+        }
+
+        .timeout-indicator.active {
+            color: #d9534f;
+            font-weight: 500;
+        }
+
+        @media (max-width: 768px) {
+            .timeout-indicator {
+                font-size: 20px;
+                min-height: 26px;
+            }
+        }
+
         .voice-queue {
             border: 1px solid #ddd;
             border-radius: 8px;
@@ -922,6 +943,7 @@
         <div class="speech-display" id="speechDisplay">
             Start speaking and your words will appear here...
         </div>
+        <div class="timeout-indicator" id="timeoutIndicator" aria-live="polite"></div>
 
         <div class="ai-speech-display" id="aiSpeechDisplay" style="display: none;">
             <div class="ai-speech-header">

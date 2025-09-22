@@ -280,7 +280,7 @@ ${status.pendingInput.length > 0 ? '\nPending messages:\n' + status.pendingInput
       const textToSpeak = args?.text as string;
       const waitForResponse = args?.wait_for_response !== false;
       const timeout = args?.timeout as number;
-      
+
       if (!timeout || typeof timeout !== 'number' || timeout <= 0) {
         return {
           content: [{
@@ -309,8 +309,12 @@ ${status.pendingInput.length > 0 ? '\nPending messages:\n' + status.pendingInput
           browserInterface.httpsUrl = httpsUrl;
           
           // Continue with normal converse logic after starting interface
-          console.error(`[Converse] Speaking: "${textToSpeak}"`);
-          voiceQueue.broadcastTTS(textToSpeak);
+          const speechMessage = waitForResponse
+            ? `${textToSpeak}\n\nSpeak within ${timeout} seconds.`
+            : textToSpeak;
+
+          console.error(`[Converse] Speaking: "${speechMessage}"`);
+          voiceQueue.broadcastTTS(speechMessage);
           
           if (!waitForResponse) {
             return {
@@ -323,7 +327,7 @@ ${status.pendingInput.length > 0 ? '\nPending messages:\n' + status.pendingInput
 
           // Wait for voice input with timeout
           console.error(`[Converse] Waiting for user response...`);
-          voiceQueue.setConversationWaiting(true);
+          voiceQueue.setConversationWaiting(true, timeout);
           try {
             const result = await waitForVoiceInput(timeout, textToSpeak, voiceQueue);
             return result;
@@ -354,8 +358,12 @@ ${status.pendingInput.length > 0 ? '\nPending messages:\n' + status.pendingInput
       }
 
       // Browser interface running AND connected - normal converse flow
-      console.error(`[Converse] Speaking: "${textToSpeak}"`);
-      voiceQueue.broadcastTTS(textToSpeak);
+      const speechMessage = waitForResponse
+        ? `${textToSpeak}\n\nSpeak within ${timeout} seconds.`
+        : textToSpeak;
+
+      console.error(`[Converse] Speaking: "${speechMessage}"`);
+      voiceQueue.broadcastTTS(speechMessage);
       
       if (!waitForResponse) {
         return {
@@ -368,7 +376,7 @@ ${status.pendingInput.length > 0 ? '\nPending messages:\n' + status.pendingInput
 
       // Wait for voice input with timeout
       console.error(`[Converse] Waiting for user response...`);
-      voiceQueue.setConversationWaiting(true);
+      voiceQueue.setConversationWaiting(true, timeout);
       try {
         const result = await waitForVoiceInput(timeout, textToSpeak, voiceQueue);
         return result;

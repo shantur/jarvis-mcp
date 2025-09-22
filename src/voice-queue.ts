@@ -18,6 +18,8 @@ export class VoiceQueue {
   private sseClients = new Map<string, SSEClient>();
   private voiceActive = false;
   private conversationWaiting = false;
+  private conversationWaitDeadline: number | null = null;
+  private conversationWaitTimeout: number | null = null;
 
   // Add voice input to queue
   addInput(text: string): VoiceInput {
@@ -126,7 +128,11 @@ export class VoiceQueue {
     this.sendToClient(clientId, {
       type: 'connected',
       voiceActive: this.voiceActive,
-      pendingCount: this.getPendingInput().length
+      pendingCount: this.getPendingInput().length,
+      conversationWaiting: this.conversationWaiting,
+      conversationWaitTimeout: this.conversationWaitTimeout,
+      conversationWaitDeadline: this.conversationWaitDeadline,
+      conversationWaitRemaining: this.getConversationRemainingSeconds()
     });
 
     // Handle client disconnect
@@ -173,7 +179,21 @@ export class VoiceQueue {
     this.broadcast({
       type: 'statusUpdate',
       voiceActive: this.voiceActive,
-      connectedClients: this.sseClients.size
+      connectedClients: this.sseClients.size,
+      conversationWaiting: this.conversationWaiting,
+      conversationWaitTimeout: this.conversationWaitTimeout,
+      conversationWaitDeadline: this.conversationWaitDeadline,
+      conversationWaitRemaining: this.getConversationRemainingSeconds()
+    });
+  }
+
+  broadcastConversationWaiting(): void {
+    this.broadcast({
+      type: 'conversationWaiting',
+      waiting: this.conversationWaiting,
+      timeoutSeconds: this.conversationWaitTimeout,
+      deadline: this.conversationWaitDeadline,
+      remainingSeconds: this.getConversationRemainingSeconds()
     });
   }
 
@@ -208,9 +228,23 @@ export class VoiceQueue {
 
 
   // Set conversation waiting state
-  setConversationWaiting(waiting: boolean) {
+  setConversationWaiting(waiting: boolean, timeoutSeconds?: number) {
     this.conversationWaiting = waiting;
+
+    if (waiting && typeof timeoutSeconds === 'number' && timeoutSeconds > 0) {
+      this.conversationWaitTimeout = timeoutSeconds;
+      this.conversationWaitDeadline = Date.now() + timeoutSeconds * 1000;
+    } else {
+      this.conversationWaitTimeout = null;
+      this.conversationWaitDeadline = null;
+    }
+
     console.error(`[Queue] Conversation waiting state: ${waiting}`);
+    if (this.conversationWaitDeadline) {
+      console.error(`[Queue] Conversation deadline: ${new Date(this.conversationWaitDeadline).toISOString()}`);
+    }
+
+    this.broadcastConversationWaiting();
   }
 
   // Get connected client count
@@ -225,7 +259,19 @@ export class VoiceQueue {
       pendingInputs: this.getPendingInput().length,
       connectedClients: this.sseClients.size,
       voiceActive: this.voiceActive,
-      conversationWaiting: this.conversationWaiting
+      conversationWaiting: this.conversationWaiting,
+      conversationWaitTimeout: this.conversationWaitTimeout,
+      conversationWaitDeadline: this.conversationWaitDeadline,
+      conversationWaitRemaining: this.getConversationRemainingSeconds()
     };
+  }
+
+  private getConversationRemainingSeconds(): number | null {
+    if (!this.conversationWaiting || !this.conversationWaitDeadline) {
+      return null;
+    }
+
+    const remainingMs = this.conversationWaitDeadline - Date.now();
+    return Math.max(0, Math.ceil(remainingMs / 1000));
   }
 }

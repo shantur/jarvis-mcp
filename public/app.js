@@ -17,6 +17,7 @@ class VoiceInterfaceClient {
         this.clearBtn = document.getElementById('clearBtn');
         this.testVoiceBtn = document.getElementById('testVoiceBtn');
         this.speechDisplay = document.getElementById('speechDisplay');
+        this.timeoutIndicator = document.getElementById('timeoutIndicator');
         this.queueItems = document.getElementById('queueItems');
         this.speedSlider = document.getElementById('speedSlider');
         this.speedValue = document.getElementById('speedValue');
@@ -56,15 +57,22 @@ class VoiceInterfaceClient {
         
         // Speech recognition language (default: en-US)
         this.selectedLanguage = 'en-US';
-        
+
         // Speech session tracking
         this.currentSessionTranscript = '';
         this.speechTimeout = null;
         this.speechTimeoutDuration = 2000; // 2 seconds of silence before sending
-        
+
         // AI speech display timeout
         this.aiSpeechHideTimeout = null;
-        
+
+        // Conversation timeout tracking
+        this.conversationDeadline = null;
+        this.conversationTimeoutSeconds = null;
+        this.conversationCountdownInterval = null;
+        this.conversationCountdownInitial = null;
+        this.conversationCountdownStartTime = null;
+
         // Speech-to-text configuration
         this.sttMode = 'browser';
         this.whisperConfigured = false;
@@ -91,6 +99,14 @@ class VoiceInterfaceClient {
         this.pcmChunks = [];
         this.zeroGainNode = null;
         this.debugLastStream = null;
+
+        // Screen wake lock management
+        this.wakeLockSentinel = null;
+        this.wakeLockManuallyReleased = false;
+        this.audioWakeLockContext = null;
+        this.audioWakeLockOscillator = null;
+        this.audioWakeLockGain = null;
+        this.audioWakeLockEnabled = false;
         
         this.initializeEventSource();
         this.setupEventListeners();
@@ -1125,6 +1141,16 @@ class VoiceInterfaceClient {
             e.stopPropagation(); // Prevent double trigger from header click
             this.toggleSpeechControls();
         });
+
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden && this.alwaysOnMode) {
+                this.requestWakeLock();
+            }
+        });
+
+        window.addEventListener('beforeunload', () => {
+            this.releaseWakeLock();
+        });
     }
     
     handleServerMessage(data) {
@@ -1133,6 +1159,11 @@ class VoiceInterfaceClient {
         switch (data.type) {
             case 'connected':
                 console.log('[SSE] Server acknowledged connection');
+                if (typeof data.pendingCount === 'number') {
+                    this.queueCount.textContent = `Queue: ${data.pendingCount}`;
+                }
+                this.updateStatusFromServer(data);
+                this.updateConversationCountdown(data, 'connected');
                 break;
                 
             case 'speak':
@@ -1146,6 +1177,11 @@ class VoiceInterfaceClient {
                 
             case 'statusUpdate':
                 this.updateStatusFromServer(data);
+                this.updateConversationCountdown(data, 'status');
+                break;
+
+            case 'conversationWaiting':
+                this.updateConversationCountdown(data, 'waiting');
                 break;
                 
             default:
@@ -1212,6 +1248,8 @@ class VoiceInterfaceClient {
             
             this.queueCount.textContent = `Queue: ${data.pendingInputs}`;
             this.updateQueueDisplay(data.recentInputs);
+            this.updateStatusFromServer(data);
+            this.updateConversationCountdown(data, 'poll');
         } catch (error) {
             console.error('[API] Failed to refresh status:', error);
         }
@@ -1291,7 +1329,123 @@ class VoiceInterfaceClient {
 
         this.recognition.stop();
     }
-    
+
+    async requestWakeLock() {
+        if (!('wakeLock' in navigator)) {
+            console.log('[WakeLock] Screen wake lock not supported; using audio fallback');
+            await this.enableAudioWakeLock();
+            return;
+        }
+
+        if (this.wakeLockSentinel) {
+            return;
+        }
+
+        try {
+            this.wakeLockManuallyReleased = false;
+            this.wakeLockSentinel = await navigator.wakeLock.request('screen');
+            console.log('[WakeLock] Screen wake lock acquired');
+            await this.disableAudioWakeLock();
+
+            this.wakeLockSentinel.addEventListener('release', () => {
+                console.log('[WakeLock] Screen wake lock released');
+                this.wakeLockSentinel = null;
+
+                if (this.alwaysOnMode && !this.wakeLockManuallyReleased && !document.hidden) {
+                    this.requestWakeLock();
+                }
+            });
+        } catch (error) {
+            console.error('[WakeLock] Failed to acquire screen wake lock:', error);
+            this.wakeLockSentinel = null;
+            await this.enableAudioWakeLock();
+        }
+    }
+
+    async releaseWakeLock() {
+        if (!this.wakeLockSentinel) {
+            await this.disableAudioWakeLock();
+            return;
+        }
+
+        try {
+            this.wakeLockManuallyReleased = true;
+            await this.wakeLockSentinel.release();
+        } catch (error) {
+            console.error('[WakeLock] Failed to release screen wake lock:', error);
+        } finally {
+            this.wakeLockSentinel = null;
+            setTimeout(() => {
+                this.wakeLockManuallyReleased = false;
+            }, 0);
+            await this.disableAudioWakeLock();
+        }
+    }
+
+    async enableAudioWakeLock() {
+        if (this.audioWakeLockEnabled) {
+            if (this.audioWakeLockContext && this.audioWakeLockContext.state === 'suspended') {
+                try {
+                    await this.audioWakeLockContext.resume();
+                } catch (error) {
+                    console.error('[WakeLock] Failed to resume audio context:', error);
+                }
+            }
+            return;
+        }
+
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) {
+            console.warn('[WakeLock] Audio fallback not available');
+            return;
+        }
+
+        try {
+            this.audioWakeLockContext = new AudioCtx();
+            this.audioWakeLockOscillator = this.audioWakeLockContext.createOscillator();
+            this.audioWakeLockGain = this.audioWakeLockContext.createGain();
+
+            this.audioWakeLockGain.gain.value = 0.0001;
+            this.audioWakeLockOscillator.frequency.value = 0.5;
+
+            this.audioWakeLockOscillator.connect(this.audioWakeLockGain);
+            this.audioWakeLockGain.connect(this.audioWakeLockContext.destination);
+
+            this.audioWakeLockOscillator.start();
+            this.audioWakeLockEnabled = true;
+            console.log('[WakeLock] Audio fallback started');
+        } catch (error) {
+            console.error('[WakeLock] Failed to start audio fallback:', error);
+            this.audioWakeLockEnabled = false;
+        }
+    }
+
+    async disableAudioWakeLock() {
+        if (!this.audioWakeLockEnabled) {
+            return;
+        }
+
+        try {
+            if (this.audioWakeLockOscillator) {
+                this.audioWakeLockOscillator.stop();
+                this.audioWakeLockOscillator.disconnect();
+            }
+            if (this.audioWakeLockGain) {
+                this.audioWakeLockGain.disconnect();
+            }
+            if (this.audioWakeLockContext) {
+                await this.audioWakeLockContext.close();
+            }
+        } catch (error) {
+            console.error('[WakeLock] Failed to stop audio fallback:', error);
+        } finally {
+            this.audioWakeLockOscillator = null;
+            this.audioWakeLockGain = null;
+            this.audioWakeLockContext = null;
+            this.audioWakeLockEnabled = false;
+        }
+    }
+
     toggleAlwaysOnMode() {
         this.alwaysOnMode = !this.alwaysOnMode;
         console.log('[Speech] Always-on mode:', this.alwaysOnMode ? 'enabled' : 'disabled');
@@ -1304,11 +1458,15 @@ class VoiceInterfaceClient {
             this.setVoiceState(true);
             // Start listening when enabling always-on mode
             this.startListening();
+            // Keep the screen awake while always-on is active
+            this.requestWakeLock();
         } else {
             // Stop listening when disabling always-on mode
             this.stopListening();
             // Set voice state to inactive when disabling always-on mode
             this.setVoiceState(false);
+            // Allow the screen to sleep again
+            this.releaseWakeLock();
         }
         
         // Save preference
@@ -1869,7 +2027,122 @@ class VoiceInterfaceClient {
             this.testVoiceBtn.disabled = true;
         }
     }
-    
+
+    updateConversationCountdown(data, source = 'status') {
+        if (!this.timeoutIndicator) {
+            return;
+        }
+
+        const waiting = typeof data.waiting === 'boolean'
+            ? data.waiting
+            : typeof data.conversationWaiting === 'boolean'
+                ? data.conversationWaiting
+                : false;
+
+        if (!waiting) {
+            this.clearConversationCountdown();
+            return;
+        }
+
+        const timeoutSeconds = typeof data.timeoutSeconds === 'number'
+            ? data.timeoutSeconds
+            : typeof data.conversationWaitTimeout === 'number'
+                ? data.conversationWaitTimeout
+                : null;
+
+        const remainingSecondsFromServer = typeof data.remainingSeconds === 'number'
+            ? data.remainingSeconds
+            : typeof data.conversationWaitRemaining === 'number'
+                ? data.conversationWaitRemaining
+                : null;
+
+        this.conversationTimeoutSeconds = timeoutSeconds;
+        this.conversationDeadline = typeof data.deadline === 'number'
+            ? data.deadline
+            : typeof data.conversationWaitDeadline === 'number'
+                ? data.conversationWaitDeadline
+                : null;
+
+        const countdownRunning = typeof this.conversationCountdownInitial === 'number' && this.conversationCountdownStartTime !== null;
+
+        if (typeof remainingSecondsFromServer === 'number' && countdownRunning && source !== 'waiting') {
+            const elapsedSeconds = (performance.now() - this.conversationCountdownStartTime) / 1000;
+            const currentRemaining = Math.max(0, this.conversationCountdownInitial - elapsedSeconds);
+            if (Math.abs(currentRemaining - remainingSecondsFromServer) >= 2) {
+                this.conversationCountdownInitial = remainingSecondsFromServer;
+                this.conversationCountdownStartTime = performance.now();
+            }
+        }
+
+        const initialSeconds = typeof remainingSecondsFromServer === 'number'
+            ? remainingSecondsFromServer
+            : typeof timeoutSeconds === 'number'
+                ? timeoutSeconds
+                : null;
+
+        const shouldStartCountdown =
+            source === 'waiting' ||
+            (!countdownRunning && initialSeconds !== null) ||
+            (source === 'connected' && initialSeconds !== null && !countdownRunning);
+
+        if (shouldStartCountdown) {
+            if (this.conversationCountdownInterval) {
+                clearInterval(this.conversationCountdownInterval);
+                this.conversationCountdownInterval = null;
+            }
+            this.conversationCountdownInitial = initialSeconds;
+            this.conversationCountdownStartTime = initialSeconds !== null ? performance.now() : null;
+        }
+
+        this.startConversationCountdown();
+    }
+
+    startConversationCountdown() {
+        if (!this.timeoutIndicator) {
+            return;
+        }
+
+        this.timeoutIndicator.classList.add('active');
+
+        if (!this.conversationCountdownInterval && typeof this.conversationCountdownInitial === 'number') {
+            this.conversationCountdownInterval = setInterval(() => this.renderConversationCountdown(), 250);
+        }
+
+        this.renderConversationCountdown();
+    }
+
+    clearConversationCountdown() {
+        if (this.conversationCountdownInterval) {
+            clearInterval(this.conversationCountdownInterval);
+            this.conversationCountdownInterval = null;
+        }
+
+        this.conversationDeadline = null;
+        this.conversationTimeoutSeconds = null;
+        this.conversationCountdownInitial = null;
+        this.conversationCountdownStartTime = null;
+
+        if (this.timeoutIndicator) {
+            this.timeoutIndicator.textContent = '';
+            this.timeoutIndicator.classList.remove('active');
+        }
+    }
+
+    renderConversationCountdown() {
+        if (!this.timeoutIndicator) {
+            return;
+        }
+
+        if (typeof this.conversationCountdownInitial === 'number' && this.conversationCountdownStartTime !== null) {
+            const elapsedSeconds = (performance.now() - this.conversationCountdownStartTime) / 1000;
+            const remainingSeconds = Math.max(0, Math.ceil(this.conversationCountdownInitial - elapsedSeconds));
+
+            this.timeoutIndicator.textContent = `${remainingSeconds}s left to respond.`;
+        } else {
+            this.timeoutIndicator.textContent = 'Awaiting your response...';
+        }
+    }
+
     updateStatusFromServer(data) {
         // Update voice status from server
         if (data.voiceActive !== undefined) {
