@@ -1,7 +1,7 @@
 {
   "name": "mcp-voice-interface",
   "version": "1.0.1",
-  "description": "Browser-based voice input/output for AI Assistant conversations via MCP (Model Context Protocol)",
+  "description": "Jarvis MCP – Browser-based voice input/output for AI Assistant conversations via MCP (Model Context Protocol)",
   "main": "dist/index.js",
   "type": "module",
   "bin": {
@@ -29,7 +29,7 @@
     "tts",
     "stt"
   ],
-  "author": "MCP Voice Interface Team",
+  "author": "Jarvis MCP Team",
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",

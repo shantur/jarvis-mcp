@@ -35,7 +35,21 @@ class VoiceInterfaceClient {
         this.speechControls = document.getElementById('speechControls');
         this.speechControlsHeader = document.getElementById('speechControlsHeader');
         this.speechControlsToggle = document.getElementById('speechControlsToggle');
-        
+        this.sessionOverlay = document.getElementById('sessionOverlay');
+        this.useHereButton = document.getElementById('useHereButton');
+        this.useOtherButton = document.getElementById('useOtherButton');
+        this.shareSection = document.getElementById('shareSection');
+        this.overlayShareGrid = document.getElementById('overlayShareGrid');
+        this.overlayFooter = document.getElementById('overlayFooter');
+        this.sessionBanner = document.getElementById('sessionBanner');
+        this.shareToggleButton = document.getElementById('shareToggle');
+        this.deviceDrawer = document.getElementById('deviceDrawer');
+        this.drawerShareGrid = document.getElementById('drawerShareGrid');
+        this.closeDrawerButton = document.getElementById('closeDrawerButton');
+        this.autoClaimOption = document.getElementById('autoClaimOption');
+        this.rememberDeviceToggle = document.getElementById('rememberDeviceToggle');
+        this.rememberDurationText = document.getElementById('rememberDuration');
+
         // TTS state
         this.isSpeaking = false;
         this.wasListeningBeforeTTS = false;
@@ -107,6 +121,24 @@ class VoiceInterfaceClient {
         this.audioWakeLockOscillator = null;
         this.audioWakeLockGain = null;
         this.audioWakeLockEnabled = false;
+
+        // Session management state
+        this.clientId = null;
+        this.activeClientId = null;
+        this.sessionActiveHere = false;
+        this.audioReady = false;
+        this.hostCandidates = [];
+        this.httpsPort = null;
+        this.pendingAudioReady = false;
+        this.overlayHasRenderedHosts = false;
+        this.autoClaimSeconds = 0;
+        this.autoClaimAttempted = false;
+        this.autoClaimStateKey = 'mcpVoiceAutoClaim';
+        this.autoClaimState = this.loadAutoClaimState();
+        this.sessionStatusReceived = false;
+        this.autoClaimInFlight = false;
+
+        this.updateOverlayFooter('Connecting to voice server…');
         
         this.initializeEventSource();
         this.setupEventListeners();
@@ -286,12 +318,26 @@ class VoiceInterfaceClient {
             this.sttMode = data.sttMode || 'browser';
             this.whisperConfigured = !!data.whisperConfigured;
             if (typeof data.whisperProxyPath === 'string') {
-                this.whisperProxyPath = data.whisperProxyPath;
+            this.whisperProxyPath = data.whisperProxyPath;
             }
+            if (Array.isArray(data.hostCandidates)) {
+                this.hostCandidates = data.hostCandidates;
+            }
+            if (typeof data.httpsPort === 'number' || typeof data.httpsPort === 'string') {
+                this.httpsPort = data.httpsPort;
+            }
+            if (typeof data.sessionAutoClaimSeconds === 'number') {
+                this.autoClaimSeconds = Math.max(0, data.sessionAutoClaimSeconds);
+            }
+            this.updateAutoClaimUI();
+            this.scheduleAutoClaimIfEligible();
+            this.renderShareTargets();
         } catch (error) {
             console.error('[Config] Failed to load server config, falling back to browser STT:', error);
             this.sttMode = 'browser';
             this.whisperConfigured = false;
+            this.autoClaimSeconds = 0;
+            this.updateAutoClaimUI();
         }
 
         const whisperSupported = this.mediaRecorderSupported && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
@@ -1131,6 +1177,21 @@ class VoiceInterfaceClient {
         this.stopAiOnUserSpeechToggle.addEventListener('click', () => {
             this.toggleStopAiOnUserSpeech();
         });
+
+        if (this.rememberDeviceToggle) {
+            this.rememberDeviceToggle.addEventListener('change', () => {
+                if (!this.autoClaimSeconds) {
+                    return;
+                }
+                if (this.rememberDeviceToggle.checked) {
+                    const expiresAt = Date.now() + this.autoClaimSeconds * 1000;
+                    this.persistAutoClaimState(expiresAt);
+                    this.scheduleAutoClaimIfEligible();
+                } else {
+                    this.clearAutoClaimState();
+                }
+            });
+        }
         
         // Speech controls collapse/expand event listeners
         this.speechControlsHeader.addEventListener('click', () => {
@@ -1151,6 +1212,30 @@ class VoiceInterfaceClient {
         window.addEventListener('beforeunload', () => {
             this.releaseWakeLock();
         });
+
+        if (this.useHereButton) {
+            this.useHereButton.addEventListener('click', async () => {
+                await this.claimSessionHere();
+            });
+        }
+
+        if (this.useOtherButton) {
+            this.useOtherButton.addEventListener('click', () => {
+                this.showShareOptions();
+            });
+        }
+
+        if (this.shareToggleButton) {
+            this.shareToggleButton.addEventListener('click', () => {
+                this.openDeviceDrawer();
+            });
+        }
+
+        if (this.closeDrawerButton) {
+            this.closeDrawerButton.addEventListener('click', () => {
+                this.closeDeviceDrawer();
+            });
+        }
     }
     
     handleServerMessage(data) {
@@ -1159,15 +1244,30 @@ class VoiceInterfaceClient {
         switch (data.type) {
             case 'connected':
                 console.log('[SSE] Server acknowledged connection');
+                if (data.clientId) {
+                    const firstAssignment = !this.clientId;
+                    this.clientId = data.clientId;
+                    if (firstAssignment) {
+                        this.onClientIdReady();
+                    }
+                }
                 if (typeof data.pendingCount === 'number') {
                     this.queueCount.textContent = `Queue: ${data.pendingCount}`;
                 }
                 this.updateStatusFromServer(data);
                 this.updateConversationCountdown(data, 'connected');
                 break;
+
+            case 'sessionStatus':
+                this.handleSessionStatus(data);
+                break;
                 
             case 'speak':
-                this.speakText(data.text);
+                if (this.sessionActiveHere) {
+                    this.speakText(data.text);
+                } else {
+                    console.log('[SSE] Skipping TTS on inactive device');
+                }
                 break;
                 
             case 'queueUpdate':
@@ -1228,6 +1328,9 @@ class VoiceInterfaceClient {
     }
     
     async setVoiceState(active) {
+        if (!this.sessionActiveHere) {
+            return;
+        }
         try {
             await fetch(`${this.baseUrl}/api/voice-state`, {
                 method: 'POST',
@@ -1271,6 +1374,11 @@ class VoiceInterfaceClient {
     }
     
     toggleListening() {
+        if (!this.sessionActiveHere) {
+            this.updateSessionBanner('Session is active on another device. Tap “Use This Device” to reclaim.');
+            return;
+        }
+
         if (this.alwaysOnMode && this.isListening) {
             // In always-on mode and currently listening, clicking should toggle always-on off
             this.toggleAlwaysOnMode();
@@ -1285,6 +1393,11 @@ class VoiceInterfaceClient {
     }
 
     startListening() {
+        if (!this.sessionActiveHere) {
+            console.log('[Speech] Ignoring startListening because session is not active here');
+            return;
+        }
+
         if (this.isListening) {
             return;
         }
@@ -1555,6 +1668,10 @@ class VoiceInterfaceClient {
     }
     
     speakText(text) {
+        if (!this.sessionActiveHere) {
+            console.log('[TTS] Ignoring speech because this device is not active.');
+            return;
+        }
         if ('speechSynthesis' in window) {
             // Stop any currently playing speech to allow immediate interruption
             if (this.isSpeaking) {
@@ -1692,6 +1809,19 @@ class VoiceInterfaceClient {
             pauseDuringSpeech: this.pauseDuringSpeech,
             restartTimeout: !!this.restartTimeout
         });
+        if (!this.sessionActiveHere) {
+            this.voiceBtn.classList.remove('listening');
+            this.voiceBtnText.textContent = 'Use This Device to Talk';
+            this.voiceBtn.disabled = true;
+            if (this.voiceStatus) {
+                this.voiceStatus.classList.remove('active');
+            }
+            if (this.voiceText) {
+                this.voiceText.textContent = this.activeClientId ? 'Active elsewhere' : 'Awaiting device';
+            }
+            this.testVoiceBtn.disabled = true;
+            return;
+        }
         const usingWhisper = this.sttMode === 'whisper';
         const canStartWhisper = usingWhisper ? !!this.mediaRecorder : true;
         
@@ -1726,11 +1856,11 @@ class VoiceInterfaceClient {
                 } else {
                     // Genuinely not listening - show ready state
                     this.voiceBtn.classList.remove('listening');
-                    this.voiceBtnText.textContent = 'Start Always-On';
+                    this.voiceBtnText.textContent = 'Start Talking (Always-On)';
                     this.voiceText.textContent = usingWhisper ? 'Always-On Ready (Whisper)' : 'Always-On Ready';
                     this.speechDisplay.textContent = usingWhisper
-                        ? 'Click "Start Always-On" to begin Whisper streaming...'
-                        : 'Click "Start Always-On" to begin continuous listening...';
+                        ? 'Click "Start Talking (Always-On)" to begin Whisper streaming...'
+                        : 'Click "Start Talking (Always-On)" to begin continuous listening...';
                     this.speechDisplay.classList.remove('active');
                     this.voiceBtn.disabled = !this.isConnected || !canStartWhisper;
                     this.voiceStatus.classList.remove('active');
@@ -1738,7 +1868,7 @@ class VoiceInterfaceClient {
             } else {
                 // Normal mode - show inactive state
                 this.voiceBtn.classList.remove('listening');
-                this.voiceBtnText.textContent = usingWhisper ? 'Start Whisper' : 'Start Listening';
+                this.voiceBtnText.textContent = usingWhisper ? 'Start Talking (Whisper)' : 'Start Talking';
                 this.voiceText.textContent = usingWhisper ? 'Whisper Idle' : 'Voice Inactive';
                 this.speechDisplay.textContent = usingWhisper
                     ? 'Start speaking and Whisper will transcribe your words...'
@@ -2013,19 +2143,553 @@ class VoiceInterfaceClient {
     }
     
     updateConnectionUI() {
+        if (!this.connectionStatus) {
+            return;
+        }
+
+        this.connectionStatus.classList.remove('active', 'warning');
+
         if (this.isConnected) {
             this.connectionStatus.classList.remove('disconnected');
             this.connectionStatus.classList.add('connected');
-            this.connectionText.textContent = 'Connected';
-            this.voiceBtn.disabled = false;
-            this.testVoiceBtn.disabled = false;
+
+            if (this.sessionActiveHere) {
+                this.connectionStatus.classList.add('active');
+                this.connectionText.textContent = 'Connected · This device active';
+            } else if (this.activeClientId) {
+                this.connectionStatus.classList.add('warning');
+                this.connectionText.textContent = 'Connected · Active on another device';
+            } else {
+                this.connectionStatus.classList.add('warning');
+                this.connectionText.textContent = 'Connected · Waiting for device';
+            }
+
+            this.testVoiceBtn.disabled = !(this.sessionActiveHere && !this.isSpeaking);
         } else {
             this.connectionStatus.classList.remove('connected');
             this.connectionStatus.classList.add('disconnected');
             this.connectionText.textContent = 'Disconnected';
-            this.voiceBtn.disabled = true;
             this.testVoiceBtn.disabled = true;
+            this.voiceBtn.disabled = true;
         }
+
+        if (!this.sessionActiveHere) {
+            this.voiceBtn.disabled = true;
+        }
+    }
+
+    onClientIdReady() {
+        if (this.useHereButton) {
+            this.useHereButton.disabled = false;
+        }
+        this.updateOverlayFooter('Tap “Use This Device” to enable audio.');
+        this.updateAutoClaimUI();
+        this.scheduleAutoClaimIfEligible();
+    }
+
+    showShareOptions() {
+        if (this.shareSection) {
+            this.shareSection.style.display = 'block';
+        }
+        this.renderShareTargets();
+        this.updateOverlayFooter('Scan a QR code or open a link on another device, then tap “Use This Device” there.');
+    }
+
+    openDeviceDrawer() {
+        this.renderShareTargets();
+        if (this.deviceDrawer) {
+            this.deviceDrawer.classList.add('open');
+        }
+    }
+
+    closeDeviceDrawer() {
+        if (this.deviceDrawer) {
+            this.deviceDrawer.classList.remove('open');
+        }
+    }
+
+    updateOverlayFooter(message) {
+        if (this.overlayFooter) {
+            this.overlayFooter.textContent = message || '';
+        }
+    }
+
+    showSessionOverlay() {
+        if (!this.sessionOverlay) {
+            return;
+        }
+        this.autoClaimAttempted = false;
+        this.autoClaimState = this.loadAutoClaimState();
+        this.autoClaimInFlight = false;
+        this.updateAutoClaimUI();
+        this.sessionOverlay.classList.remove('hidden');
+        if (this.useHereButton) {
+            this.useHereButton.disabled = !this.clientId;
+        }
+        setTimeout(() => this.scheduleAutoClaimIfEligible(), 0);
+    }
+
+    hideSessionOverlay() {
+        if (this.sessionOverlay) {
+            this.sessionOverlay.classList.add('hidden');
+        }
+        this.autoClaimAttempted = false;
+    }
+
+    handleSessionStatus(data) {
+        this.activeClientId = data?.activeClientId || null;
+        const sessions = Array.isArray(data?.sessions) ? data.sessions : [];
+        this.sessionStatusReceived = true;
+        if (Array.isArray(data?.hostCandidates) && data.hostCandidates.length) {
+            this.hostCandidates = data.hostCandidates;
+        }
+        if (typeof data?.httpsPort === 'number' || typeof data?.httpsPort === 'string') {
+            this.httpsPort = data.httpsPort;
+        }
+        if (typeof data?.autoClaimSeconds === 'number') {
+            const seconds = Math.max(0, data.autoClaimSeconds);
+            if (seconds !== this.autoClaimSeconds) {
+                this.autoClaimSeconds = seconds;
+                this.updateAutoClaimUI();
+            }
+        }
+        const activeSession = this.activeClientId
+            ? sessions.find((session) => session.id === this.activeClientId)
+            : null;
+
+        const weAreActive = !!this.clientId && this.clientId === this.activeClientId && !!activeSession?.audioReady;
+        this.sessionActiveHere = weAreActive;
+        this.audioReady = !!activeSession?.audioReady && weAreActive;
+
+        if (!activeSession || !activeSession.audioReady) {
+            this.showSessionOverlay();
+            this.updateSessionBanner('Waiting for a device to enable audio.');
+        } else if (!weAreActive) {
+            this.hideSessionOverlay();
+            this.updateSessionBanner('Session is active on another device. Tap “Use This Device” to reclaim.');
+            this.stopListening();
+        } else {
+            this.hideSessionOverlay();
+            this.updateSessionBanner('');
+        }
+
+        this.updateConnectionUI();
+        this.updateVoiceUI();
+        this.renderShareTargets();
+        this.scheduleAutoClaimIfEligible();
+    }
+
+    updateSessionBanner(message) {
+        if (!this.sessionBanner) {
+            return;
+        }
+
+        this.sessionBanner.innerHTML = '';
+        this.sessionBanner.classList.remove('active');
+
+        if (!message) {
+            return;
+        }
+
+        const text = document.createElement('span');
+        text.textContent = message;
+        this.sessionBanner.appendChild(text);
+
+        const showClaimButton = message.includes('Use This Device');
+        if (showClaimButton) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.textContent = 'Use This Device';
+            button.className = 'share-toggle-btn';
+            button.style.marginLeft = '12px';
+            button.addEventListener('click', () => {
+                this.claimSessionHere();
+            });
+            this.sessionBanner.appendChild(button);
+        }
+
+        this.sessionBanner.classList.add('active');
+    }
+
+    loadAutoClaimState() {
+        try {
+            const raw = localStorage.getItem(this.autoClaimStateKey);
+            if (!raw) {
+                return null;
+            }
+            const parsed = JSON.parse(raw);
+            if (parsed && typeof parsed.expiresAt === 'number') {
+                return parsed;
+            }
+        } catch (error) {
+            console.warn('[AutoClaim] Failed to load state:', error);
+        }
+        return null;
+    }
+
+    persistAutoClaimState(expiresAt) {
+        if (!Number.isFinite(expiresAt)) {
+            return;
+        }
+        const state = { expiresAt };
+        this.autoClaimState = state;
+        try {
+            localStorage.setItem(this.autoClaimStateKey, JSON.stringify(state));
+        } catch (error) {
+            console.warn('[AutoClaim] Failed to persist state:', error);
+        }
+        if (this.rememberDeviceToggle) {
+            this.rememberDeviceToggle.checked = true;
+        }
+    }
+
+    clearAutoClaimState() {
+        this.autoClaimState = null;
+        try {
+            localStorage.removeItem(this.autoClaimStateKey);
+        } catch (error) {
+            console.warn('[AutoClaim] Failed to clear state:', error);
+        }
+        if (this.rememberDeviceToggle) {
+            this.rememberDeviceToggle.checked = false;
+        }
+    }
+
+    formatDuration(seconds) {
+        if (!seconds || seconds < 0) {
+            return '';
+        }
+        if (seconds % 3600 === 0) {
+            const hours = seconds / 3600;
+            return hours === 1 ? '1 hour' : `${hours} hours`;
+        }
+        if (seconds >= 3600) {
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.round((seconds % 3600) / 60);
+            if (minutes === 0) {
+                return hours === 1 ? '1 hour' : `${hours} hours`;
+            }
+            return `${hours}h ${minutes}m`;
+        }
+        if (seconds % 60 === 0) {
+            const minutes = seconds / 60;
+            return minutes === 1 ? '1 minute' : `${minutes} minutes`;
+        }
+        return `${seconds} seconds`;
+    }
+
+    updateAutoClaimUI() {
+        if (!this.autoClaimOption) {
+            return;
+        }
+
+        if (!this.autoClaimSeconds) {
+            this.autoClaimOption.style.display = 'none';
+            return;
+        }
+
+        this.autoClaimOption.style.display = 'block';
+
+        if (this.rememberDurationText) {
+            this.rememberDurationText.textContent = this.formatDuration(this.autoClaimSeconds);
+        }
+
+        const state = this.loadAutoClaimState();
+        const valid = !!state && typeof state.expiresAt === 'number' && state.expiresAt > Date.now();
+        this.autoClaimState = valid ? state : null;
+
+        if (!valid && this.rememberDeviceToggle) {
+            this.rememberDeviceToggle.checked = true;
+        }
+
+        if (valid && this.rememberDeviceToggle) {
+            this.rememberDeviceToggle.checked = true;
+        }
+    }
+
+    scheduleAutoClaimIfEligible() {
+        if (!this.sessionStatusReceived) {
+            return;
+        }
+        if (this.autoClaimAttempted || this.autoClaimInFlight || this.sessionActiveHere || this.autoClaimSeconds <= 0 || this.pendingAudioReady) {
+            return;
+        }
+        if (!this.clientId) {
+            return;
+        }
+        const state = this.loadAutoClaimState();
+        this.autoClaimState = state;
+        if (!state || typeof state.expiresAt !== 'number') {
+            return;
+        }
+        if (state.expiresAt <= Date.now()) {
+            this.clearAutoClaimState();
+            return;
+        }
+        if (this.activeClientId && this.activeClientId !== this.clientId) {
+            return;
+        }
+
+        this.autoClaimAttempted = true;
+        this.updateOverlayFooter('Reconnecting to this device…');
+        if (this.useHereButton) {
+            this.useHereButton.disabled = false;
+        }
+        this.claimSessionHere(true).then((success) => {
+            if (!success && this.useHereButton) {
+                this.useHereButton.disabled = false;
+            }
+        }).catch(() => {
+            if (this.useHereButton) {
+                this.useHereButton.disabled = false;
+            }
+            this.updateOverlayFooter('Automatic reconnect failed. Please tap “Use This Device”.');
+        });
+    }
+
+    buildShareTargets() {
+        if (!this.hostCandidates || !this.hostCandidates.length) {
+            return [];
+        }
+
+        const port = this.httpsPort || window.location.port || 443;
+        const targets = [];
+        const seen = new Set();
+
+        this.hostCandidates.forEach((host) => {
+            if (typeof host !== 'string' || !host) {
+                return;
+            }
+            const needsBrackets = host.includes(':') && !host.startsWith('[');
+            const hostPart = needsBrackets ? `[${host}]` : host;
+            const url = `https://${hostPart}:${port}`;
+            if (seen.has(url)) {
+                return;
+            }
+            seen.add(url);
+            targets.push({ host, url });
+        });
+
+        return targets;
+    }
+
+    renderShareTargets() {
+        const targets = this.buildShareTargets();
+
+        if (!targets.length) {
+            this.updateOverlayFooter('Waiting for shareable links…');
+            return;
+        }
+
+        this.updateOverlayFooter('Tap “Use This Device” or share a link to open on another device.');
+        this.populateShareGrid(this.overlayShareGrid, targets);
+        this.populateShareGrid(this.drawerShareGrid, targets);
+
+        if (this.shareSection && this.shareSection.style.display !== 'block' && !this.overlayHasRenderedHosts) {
+            this.shareSection.style.display = 'block';
+        }
+        this.overlayHasRenderedHosts = true;
+    }
+
+    populateShareGrid(container, targets) {
+        if (!container) {
+            return;
+        }
+
+        container.innerHTML = '';
+
+        targets.forEach((target) => {
+            const card = document.createElement('div');
+            card.className = 'share-card';
+
+            if (window.SimpleQR) {
+                try {
+                    const canvas = window.SimpleQR.createCanvas(target.url, { size: 140, margin: 8 });
+                    card.appendChild(canvas);
+                } catch (error) {
+                    console.warn('[QR] Failed to render QR code:', error);
+                }
+            }
+
+            const urlEl = document.createElement('div');
+            urlEl.className = 'share-url';
+            urlEl.textContent = target.url;
+            card.appendChild(urlEl);
+
+            const actions = document.createElement('div');
+            actions.className = 'share-actions';
+
+            const copyBtn = document.createElement('button');
+            copyBtn.type = 'button';
+            copyBtn.textContent = 'Copy';
+            copyBtn.addEventListener('click', () => {
+                this.copyToClipboard(target.url);
+            });
+
+            const openBtn = document.createElement('button');
+            openBtn.type = 'button';
+            openBtn.textContent = 'Open';
+            openBtn.addEventListener('click', () => {
+                window.open(target.url, '_blank', 'noopener');
+            });
+
+            actions.appendChild(copyBtn);
+            actions.appendChild(openBtn);
+            card.appendChild(actions);
+
+            container.appendChild(card);
+        });
+    }
+
+    async copyToClipboard(text) {
+        try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(text);
+            } else {
+                const tempInput = document.createElement('input');
+                tempInput.value = text;
+                document.body.appendChild(tempInput);
+                tempInput.select();
+                document.execCommand('copy');
+                document.body.removeChild(tempInput);
+            }
+            this.updateOverlayFooter('Copied link to clipboard.');
+        } catch (error) {
+            console.error('[Clipboard] Failed to copy:', error);
+            this.updateOverlayFooter('Copy failed. Long-press or right-click to copy.');
+        }
+    }
+
+    async claimSessionHere(autoTriggered = false) {
+        if (!this.clientId) {
+            this.updateOverlayFooter('Still connecting… try again in a moment.');
+            return false;
+        }
+
+        if (autoTriggered) {
+            if (this.autoClaimInFlight) {
+                return false;
+            }
+            this.autoClaimInFlight = true;
+        } else {
+            if (this.pendingAudioReady) {
+                return false;
+            }
+            this.pendingAudioReady = true;
+            if (this.useHereButton) {
+                this.useHereButton.disabled = true;
+            }
+        }
+        this.updateOverlayFooter(autoTriggered ? 'Reconnecting to this device…' : 'Enabling audio…');
+
+        await this.resumeAudioContexts();
+
+        let success = false;
+        try {
+            const label = this.buildDeviceLabel();
+            const response = await fetch(`${this.baseUrl}/api/audio-ready`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ clientId: this.clientId, label })
+            });
+
+            if (!response.ok) {
+                throw new Error(`Audio-ready failed (${response.status})`);
+            }
+
+            this.activeClientId = this.clientId;
+            this.sessionActiveHere = true;
+            this.audioReady = true;
+            this.updateConnectionUI();
+            this.updateVoiceUI();
+            this.hideSessionOverlay();
+            this.updateOverlayFooter('');
+            this.updateSessionBanner('');
+            success = true;
+
+            if (this.autoClaimSeconds > 0) {
+                if (autoTriggered) {
+                    const expiresAt = Date.now() + this.autoClaimSeconds * 1000;
+                    this.persistAutoClaimState(expiresAt);
+                } else if (this.rememberDeviceToggle && this.rememberDeviceToggle.checked) {
+                    const expiresAt = Date.now() + this.autoClaimSeconds * 1000;
+                    this.persistAutoClaimState(expiresAt);
+                } else if (!autoTriggered) {
+                    this.clearAutoClaimState();
+                }
+            }
+        } catch (error) {
+            console.error('[Audio] Failed to claim session:', error);
+            this.updateOverlayFooter('Failed to enable audio. Check browser permissions and try again.');
+            if (this.useHereButton) {
+                this.useHereButton.disabled = false;
+            }
+            if (autoTriggered) {
+                this.updateSessionBanner('Automatic reconnect failed. Tap “Use This Device” to reclaim.');
+            }
+        } finally {
+            if (autoTriggered) {
+                this.autoClaimInFlight = false;
+            } else {
+                this.pendingAudioReady = false;
+            }
+        }
+
+        return success;
+    }
+
+    async resumeAudioContexts() {
+        try {
+            if (!this.audioContext && (window.AudioContext || window.webkitAudioContext)) {
+                const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                this.audioContext = new AudioCtx();
+            }
+
+            if (this.audioContext && this.audioContext.state === 'suspended') {
+                await this.audioContext.resume();
+            }
+        } catch (error) {
+            console.warn('[Audio] Failed to resume audio context:', error);
+        }
+
+        if ('speechSynthesis' in window) {
+            try {
+                speechSynthesis.cancel();
+                speechSynthesis.resume();
+            } catch (error) {
+                console.warn('[Audio] Speech synthesis resume failed:', error);
+            }
+        }
+    }
+
+    buildDeviceLabel() {
+        const ua = navigator.userAgent || '';
+        if (!ua) {
+            return undefined;
+        }
+        const parts = [];
+        if (/Mobile/i.test(ua)) {
+            parts.push('Mobile');
+        }
+        if (/Android/i.test(ua)) {
+            parts.push('Android');
+        } else if (/iPhone|iPad|iPod/i.test(ua)) {
+            parts.push('iOS');
+        } else if (/Macintosh/i.test(ua)) {
+            parts.push('macOS');
+        } else if (/Windows/i.test(ua)) {
+            parts.push('Windows');
+        } else if (/Linux/i.test(ua)) {
+            parts.push('Linux');
+        }
+        const browserMatch = ua.match(/(Chrome|Safari|Firefox|Edg|Brave)[\/]([\d\.]+)/i);
+        if (browserMatch) {
+            const name = browserMatch[1] === 'Edg' ? 'Edge' : browserMatch[1];
+            parts.push(name);
+        }
+        return parts.join(' ');
     }
 
     updateConversationCountdown(data, source = 'status') {
@@ -2145,6 +2809,11 @@ class VoiceInterfaceClient {
 
     updateStatusFromServer(data) {
         // Update voice status from server
+        if (!this.sessionActiveHere) {
+            this.voiceStatus.classList.remove('active');
+            return;
+        }
+
         if (data.voiceActive !== undefined) {
             if (data.voiceActive && !this.isListening) {
                 this.voiceStatus.classList.add('active');

@@ -127,6 +127,7 @@ export class VoiceQueue {
     // Send initial status
     this.sendToClient(clientId, {
       type: 'connected',
+      clientId,
       voiceActive: this.voiceActive,
       pendingCount: this.getPendingInput().length,
       conversationWaiting: this.conversationWaiting,
@@ -197,7 +198,7 @@ export class VoiceQueue {
     });
   }
 
-  private broadcast(message: any): void {
+  public broadcast(message: any): void {
     const messageStr = JSON.stringify(message);
     
     for (const [clientId, client] of this.sseClients) {

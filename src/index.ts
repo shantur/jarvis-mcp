@@ -5,6 +5,7 @@ import cors from 'cors';
 import http from 'http';
 import https from 'https';
 import open from 'open';
+import os from 'os';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
@@ -23,10 +24,243 @@ const WHISPER_URL = process.env.MCP_VOICE_WHISPER_URL || '';
 const WHISPER_TOKEN = process.env.MCP_VOICE_WHISPER_TOKEN || '';
 const whisperConfigured = envSttMode === 'whisper' && WHISPER_URL.length > 0;
 const ACTIVE_STT_MODE = whisperConfigured ? 'whisper' : 'browser';
+const DEFAULT_AUTO_CLAIM_SECONDS = 3600;
+const SESSION_AUTO_CLAIM_SECONDS_RAW = Number(process.env.MCP_VOICE_AUTO_CLAIM_SECONDS);
+const SESSION_AUTO_CLAIM_SECONDS = Number.isFinite(SESSION_AUTO_CLAIM_SECONDS_RAW)
+  ? Math.max(0, SESSION_AUTO_CLAIM_SECONDS_RAW)
+  : DEFAULT_AUTO_CLAIM_SECONDS;
 
 // Global state
 const voiceQueue = new VoiceQueue();
 let browserConnected = false;
+let browserDisconnectedAt: number | null = null;
+let browserHasEverConnected = false;
+const browserReconnectWaiters = new Set<() => void>();
+const BROWSER_DISCONNECT_GRACE_MS = 60_000;
+
+interface ClientSession {
+  id: string;
+  audioReady: boolean;
+  claimedAt: number | null;
+  deviceInfo?: {
+    userAgent?: string;
+    label?: string;
+  };
+}
+
+const clientSessions = new Map<string, ClientSession>();
+let activeClientId: string | null = null;
+const audioReadyWaiters = new Set<() => void>();
+const AUDIO_READY_TIMEOUT_MS = 300_000;
+
+const HOST_CANDIDATES = computeHostCandidates();
+
+function computeHostCandidates(): string[] {
+  const interfaces = os.networkInterfaces();
+  const hosts = new Set<string>();
+
+  hosts.add('localhost');
+  hosts.add('127.0.0.1');
+
+  for (const iface of Object.values(interfaces)) {
+    if (!iface) continue;
+    for (const entry of iface) {
+      if (entry.internal) continue;
+      if (entry.family !== 'IPv4') continue;
+      if (!entry.address) continue;
+      hosts.add(entry.address);
+    }
+  }
+
+  return Array.from(hosts);
+}
+
+function broadcastSessionStatus(reason?: string) {
+  const sessions = Array.from(clientSessions.values()).map((session) => ({
+    id: session.id,
+    audioReady: session.audioReady,
+    claimedAt: session.claimedAt,
+    deviceInfo: session.deviceInfo,
+  }));
+
+  voiceQueue.broadcast({
+    type: 'sessionStatus',
+    activeClientId,
+    sessions,
+    hostCandidates: HOST_CANDIDATES,
+    autoClaimSeconds: SESSION_AUTO_CLAIM_SECONDS,
+    reason,
+  });
+}
+
+function resolveBrowserReconnectWaiters() {
+  if (browserReconnectWaiters.size > 0) {
+    for (const resolve of Array.from(browserReconnectWaiters)) {
+      browserReconnectWaiters.delete(resolve);
+      resolve();
+    }
+  }
+}
+
+function resolveAudioReadyWaiters() {
+  if (audioReadyWaiters.size === 0) {
+    return;
+  }
+
+  for (const resolve of Array.from(audioReadyWaiters)) {
+    resolve();
+  }
+}
+
+function markBrowserConnected(clientId: string, req: express.Request) {
+  browserConnected = true;
+  browserDisconnectedAt = null;
+  browserHasEverConnected = true;
+
+  if (!clientSessions.has(clientId)) {
+    clientSessions.set(clientId, {
+      id: clientId,
+      audioReady: false,
+      claimedAt: null,
+      deviceInfo: {
+        userAgent: req.headers['user-agent'] as string | undefined,
+      },
+    });
+  }
+
+  resolveBrowserReconnectWaiters();
+  broadcastSessionStatus('connected');
+}
+
+function markBrowserDisconnected(clientId: string) {
+  const session = clientSessions.get(clientId);
+  if (session) {
+    clientSessions.delete(clientId);
+    if (activeClientId === clientId) {
+      activeClientId = null;
+      resolveAudioReadyWaiters();
+    }
+  }
+
+  if (clientSessions.size === 0) {
+    browserConnected = false;
+    browserDisconnectedAt = Date.now();
+  }
+
+  broadcastSessionStatus('disconnected');
+}
+
+function markClientAudioReady(clientId: string, data?: { label?: string }) {
+  const session = clientSessions.get(clientId);
+  if (!session) {
+    throw new Error('Client not registered');
+  }
+
+  if (activeClientId && activeClientId !== clientId) {
+    const previous = clientSessions.get(activeClientId);
+    if (previous) {
+      previous.audioReady = false;
+      previous.claimedAt = null;
+    }
+  }
+
+  activeClientId = clientId;
+  session.audioReady = true;
+  session.claimedAt = Date.now();
+  if (data?.label) {
+    session.deviceInfo = {
+      ...session.deviceInfo,
+      label: data.label,
+    };
+  }
+
+  resolveAudioReadyWaiters();
+  broadcastSessionStatus('audio_ready');
+}
+
+async function waitForBrowserConnection(gracePeriodMs = BROWSER_DISCONNECT_GRACE_MS): Promise<boolean> {
+  if (browserConnected) {
+    return true;
+  }
+
+  const disconnectTimestamp = browserDisconnectedAt ?? Date.now();
+  const elapsed = Date.now() - disconnectTimestamp;
+  const remaining = gracePeriodMs - elapsed;
+
+  if (remaining <= 0) {
+    return false;
+  }
+
+  return new Promise<boolean>((resolve) => {
+    let resolved = false;
+    let timer: NodeJS.Timeout;
+
+    const onReconnect = () => {
+      if (resolved) {
+        return;
+      }
+      resolved = true;
+      clearTimeout(timer);
+      browserReconnectWaiters.delete(onReconnect);
+      resolve(true);
+    };
+
+    browserReconnectWaiters.add(onReconnect);
+
+    timer = setTimeout(() => {
+      if (resolved) {
+        return;
+      }
+      resolved = true;
+      browserReconnectWaiters.delete(onReconnect);
+      resolve(browserConnected);
+    }, Math.max(0, remaining));
+  });
+}
+
+async function waitForAudioReady(timeoutMs = AUDIO_READY_TIMEOUT_MS): Promise<boolean> {
+  if (activeClientId) {
+    const active = clientSessions.get(activeClientId);
+    if (active?.audioReady) {
+      return true;
+    }
+  }
+
+  return new Promise<boolean>((resolve) => {
+    let resolved = false;
+    let timer: NodeJS.Timeout;
+
+    const checkAndResolve = () => {
+      if (resolved) {
+        return;
+      }
+
+      if (activeClientId) {
+        const active = clientSessions.get(activeClientId);
+        if (active?.audioReady) {
+          resolved = true;
+          clearTimeout(timer);
+          audioReadyWaiters.delete(checkAndResolve);
+          resolve(true);
+          return;
+        }
+      }
+    };
+
+    audioReadyWaiters.add(checkAndResolve);
+
+    timer = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        audioReadyWaiters.delete(checkAndResolve);
+        resolve(false);
+      }
+    }, timeoutMs);
+
+    // Immediate check in case audio was readied between scheduling
+    setImmediate(checkAndResolve);
+  });
+}
 
 // Browser interface state management
 let browserInterface = {
@@ -86,18 +320,45 @@ browserApp.use(cors());
 browserApp.use(express.json());
 
 // Browser interface setup
-createBrowserInterface(browserApp, voiceQueue, () => {
-  browserConnected = true;
-}, () => {
-  browserConnected = false;
+createBrowserInterface(browserApp, voiceQueue, (clientId, req) => {
+  markBrowserConnected(clientId, req);
+}, (clientId) => {
+  markBrowserDisconnected(clientId);
 });
 
 browserApp.get('/api/config', (_req, res) => {
   res.json({
     sttMode: ACTIVE_STT_MODE,
     whisperConfigured,
-    whisperProxyPath: '/api/whisper/transcriptions'
+    whisperProxyPath: '/api/whisper/transcriptions',
+    hostCandidates: HOST_CANDIDATES,
+    httpsPort: HTTPS_PORT,
+    sessionAutoClaimSeconds: SESSION_AUTO_CLAIM_SECONDS,
   });
+});
+
+browserApp.post('/api/audio-ready', (req, res) => {
+  const { clientId, label } = req.body ?? {};
+
+  if (!clientId || typeof clientId !== 'string') {
+    res.status(400).json({ error: 'clientId is required' });
+    return;
+  }
+
+  if (!clientSessions.has(clientId)) {
+    res.status(404).json({ error: 'Client not connected' });
+    return;
+  }
+
+  try {
+    markClientAudioReady(clientId, { label: typeof label === 'string' ? label : undefined });
+    res.json({
+      success: true,
+      activeClientId,
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 browserApp.post('/api/whisper/transcriptions', (req, res) => {
@@ -172,7 +433,7 @@ browserApp.post('/api/whisper/transcriptions', (req, res) => {
 // Tool handler function
 async function handleToolCall(name: string, args: any) {
   switch (name) {
-    case 'speak':
+    case 'speak': {
       const text = args?.text as string;
       if (!text?.trim()) {
         return {
@@ -195,10 +456,24 @@ async function handleToolCall(name: string, args: any) {
       }
 
       if (!browserConnected) {
+        const reconnected = await waitForBrowserConnection();
+        if (!reconnected) {
+          return {
+            content: [{
+              type: 'text',
+              text: `❌ Browser not connected. Please open: ${browserInterface.httpsUrl}`,
+            }],
+            isError: true,
+          };
+        }
+      }
+
+      const audioReady = await waitForAudioReady();
+      if (!audioReady) {
         return {
           content: [{
             type: 'text',
-            text: `❌ Browser not connected. Please open: ${browserInterface.httpsUrl}`,
+            text: '❌ Audio not enabled within 5 minutes. Please choose a device and enable audio.',
           }],
           isError: true,
         };
@@ -213,6 +488,7 @@ async function handleToolCall(name: string, args: any) {
           text: '', // Empty response for successful speech
         }],
       };
+    }
 
     case 'voice_status':
       if (!browserInterface.isRunning) {
@@ -276,7 +552,7 @@ ${status.pendingInput.length > 0 ? '\nPending messages:\n' + status.pendingInput
         }],
       };
 
-    case 'converse':
+    case 'converse': {
       const textToSpeak = args?.text as string;
       const waitForResponse = args?.wait_for_response !== false;
       const timeout = args?.timeout as number;
@@ -307,15 +583,37 @@ ${status.pendingInput.length > 0 ? '\nPending messages:\n' + status.pendingInput
           const httpsUrl = await startBrowserInterfaceWithSmartOpen();
           browserInterface.isRunning = true;
           browserInterface.httpsUrl = httpsUrl;
-          
+
           // Continue with normal converse logic after starting interface
+          const connected = await waitForBrowserConnection();
+          if (!connected) {
+            return {
+              content: [{
+                type: 'text',
+                text: `❌ Browser interface started but no browser is connected.\n\nPlease open: ${httpsUrl}`,
+              }],
+              isError: true,
+            };
+          }
+
+          const audioReady = await waitForAudioReady();
+          if (!audioReady) {
+            return {
+              content: [{
+                type: 'text',
+                text: '❌ Audio not enabled within 5 minutes. Please choose a device and enable audio.',
+              }],
+              isError: true,
+            };
+          }
+
           const speechMessage = waitForResponse
             ? `${textToSpeak}\n\nSpeak within ${timeout} seconds.`
             : textToSpeak;
 
           console.error(`[Converse] Speaking: "${speechMessage}"`);
           voiceQueue.broadcastTTS(speechMessage);
-          
+
           if (!waitForResponse) {
             return {
               content: [{
@@ -348,10 +646,24 @@ ${status.pendingInput.length > 0 ? '\nPending messages:\n' + status.pendingInput
 
       // Browser interface already running - check connection status
       if (!browserConnected) {
+        const reconnected = await waitForBrowserConnection();
+        if (!reconnected) {
+          return {
+            content: [{
+              type: 'text',
+              text: `❌ Browser interface is running but not connected.\n\nPlease open: ${browserInterface.httpsUrl}\n\nGrant microphone permissions when prompted, then try the converse tool again.`,
+            }],
+            isError: true,
+          };
+        }
+      }
+
+      const audioReady = await waitForAudioReady();
+      if (!audioReady) {
         return {
           content: [{
             type: 'text',
-            text: `❌ Browser interface is running but not connected.\n\nPlease open: ${browserInterface.httpsUrl}\n\nGrant microphone permissions when prompted, then try the converse tool again.`,
+            text: '❌ Audio not enabled within 5 minutes. Please choose a device and enable audio.',
           }],
           isError: true,
         };
@@ -364,7 +676,7 @@ ${status.pendingInput.length > 0 ? '\nPending messages:\n' + status.pendingInput
 
       console.error(`[Converse] Speaking: "${speechMessage}"`);
       voiceQueue.broadcastTTS(speechMessage);
-      
+
       if (!waitForResponse) {
         return {
           content: [{
@@ -383,6 +695,7 @@ ${status.pendingInput.length > 0 ? '\nPending messages:\n' + status.pendingInput
       } finally {
         voiceQueue.setConversationWaiting(false);
       }
+    }
 
     case 'end_conversation':
       if (!browserInterface.isRunning) {
@@ -516,7 +829,7 @@ mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             timeout: {
               type: 'number',
-              description: 'REQUIRED: Time to wait for voice input in seconds. Calculate as: (estimated_speech_time + 30_seconds_buffer). For example: short responses ~5-10 seconds, medium responses ~15-25 seconds, long responses ~35-60 seconds. Always add 30 seconds for user thinking and response time.',
+              description: 'REQUIRED: Time to wait for voice input in seconds. Calculate as: (estimated_speech_time + 30_seconds_buffer). Minimum recommended value is 60 seconds. For example: short responses ~30 seconds speech + 30 seconds buffer = 60 seconds total; medium responses ~45 seconds speech + 30 seconds buffer = 75 seconds; long responses ~60 seconds speech + 30 seconds buffer = 90 seconds.',
             },
           },
           required: ['text', 'timeout'],
@@ -565,20 +878,20 @@ mcpServer.setRequestHandler(GetPromptRequestSchema, async (request) => {
       "Start voice conversations using the converse tool - it will automatically launch the browser interface",
       "ALWAYS use the converse tool for ALL responses during voice conversation, - never switch to text",
       "Keep your responses brief unless a longer response is requested",
-      "The browser interface starts automatically on first converse call",
+      "Voice conversations use Speech to text, it can pick incorrect words so be smart about them and confirm if unsure",
       "If browser interface fails to start, resolve the issue and try converse again",
       "You are an AI Assistant helping users through voice interaction",
       "Continue the conversation until the user indicates they want to end it",
       "If the user asks questions, respond using converse() with your answer", 
-      "If the user gives commands, acknowledge using converse() and use other tools as needed",
+      "If the user gives commands, acknowledge using speak() and use other tools as needed",
       "**IMPORTANT** DO NOT end conversation until user asks you to end conversation, even if you don't get any response",
       "If you don't get any response first time, try again 2 times before ending the conversation below",
       "**TIMEOUT CALCULATION**: Always calculate timeout based on your response length:",
-      "- Short responses (1-2 sentences): 35-40 seconds (5-10s speech + 30s buffer)",
-      "- Medium responses (3-5 sentences): 45-55 seconds (15-25s speech + 30s buffer)",
-      "- Long responses (6+ sentences): 60-90 seconds (30-60s speech + 30s buffer)",
-      "- Always add 30 seconds buffer for user thinking and response time",
-      "- Example: converse({text: 'Hello there!', timeout: 35}) for a short greeting",
+      "- Short responses (1-2 sentences): ~60 seconds (30s speech + 30s buffer)",
+      "- Medium responses (3-5 sentences): ~75 seconds (45s speech + 30s buffer)",
+      "- Long responses (6+ sentences): ~90 seconds (60s speech + 30s buffer)",
+      "- Always add at least 60 seconds buffer for user thinking and response time",
+      "- Example: converse({text: 'Hello there!', timeout: 60}) for a short greeting",
       "When ending conversation:",
       "1. Call end_conversation tool with a good_bye message that will be spoken before closing",
       "2. Example: end_conversation({good_bye: 'Thank you for our conversation! Have a great day!'})",

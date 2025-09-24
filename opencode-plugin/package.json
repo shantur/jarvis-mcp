@@ -1,7 +1,7 @@
 {
   "name": "@opencode-ai/plugin-voice-interface",
   "version": "1.0.0",
-  "description": "OpenCode plugin for MCP Voice Interface - enables voice message forwarding when sessions are busy",
+  "description": "OpenCode plugin for Jarvis MCP - enables voice message forwarding when sessions are busy",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {

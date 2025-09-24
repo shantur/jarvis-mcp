@@ -5,7 +5,7 @@ import https from 'https';
 /**
  * Voice Message Service
  * 
- * Handles communication with the MCP Voice Interface to check for pending
+ * Handles communication with Jarvis MCP to check for pending
  * voice messages and forward them to OpenCode sessions.
  */
 

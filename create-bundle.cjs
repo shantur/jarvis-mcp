@@ -17,7 +17,7 @@ const indexCode = fs.readFileSync(path.join(distDir, 'index.js'), 'utf8');
 const bundledCode = `/**
  * OpenCode Voice Interface Plugin
  * 
- * This plugin integrates with the MCP Voice Interface to forward voice messages
+ * This plugin integrates with Jarvis MCP to forward voice messages
  * to OpenCode sessions even when they are busy processing other tasks.
  * 
  * Installation: Copy this file to .opencode/plugin/ directory in your project

@@ -1,4 +1,4 @@
-# MCP Voice Interface
+# Jarvis MCP
 
 Talk to AI assistants using your voice through a web browser. Compatible with Claude Desktop, OpenCode, and other MCP-enabled AI tools.
 

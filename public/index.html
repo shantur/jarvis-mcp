@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MCP Voice Interface</title>
+    <title>Jarvis MCP</title>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -812,11 +812,252 @@
                 padding: 14px 16px;
             }
         }
+
+        /* Session choice overlay and device sharing */
+        .session-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.55);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            z-index: 1000;
+        }
+
+        .session-overlay.hidden {
+            display: none;
+        }
+
+        .session-card {
+            background: #ffffff;
+            border-radius: 20px;
+            max-width: 520px;
+            width: 100%;
+            padding: 32px;
+            box-shadow: 0 30px 60px -24px rgba(15, 23, 42, 0.45);
+        }
+
+        .session-card h2 {
+            margin-top: 0;
+            margin-bottom: 12px;
+            text-align: center;
+            font-size: 24px;
+        }
+
+        .session-card p {
+            text-align: center;
+            color: #495057;
+            margin-bottom: 24px;
+        }
+
+        .session-actions {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .session-actions button {
+            flex: 1 1 220px;
+            border: none;
+            border-radius: 12px;
+            padding: 14px 18px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+
+        .primary-btn {
+            background: #2563eb;
+            color: #ffffff;
+        }
+
+        .primary-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .primary-btn:hover:not(:disabled) {
+            background: #1d4ed8;
+        }
+
+        .outline-btn {
+            background: transparent;
+            border: 1px solid #ced4da;
+            color: #1f2937;
+        }
+
+        .outline-btn:hover {
+            border-color: #94a3b8;
+        }
+
+        .share-section {
+            border-top: 1px solid #e9ecef;
+            padding-top: 18px;
+        }
+
+        .auto-claim {
+            margin-top: 16px;
+            font-size: 14px;
+            color: #1f2937;
+        }
+
+        .auto-claim label {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .auto-claim input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+        }
+
+        .share-grid {
+            display: grid;
+            gap: 16px;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        }
+
+        .share-card {
+            border: 1px solid #e5e7eb;
+            border-radius: 16px;
+            padding: 16px;
+            text-align: center;
+            background: #ffffff;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .share-card canvas {
+            width: 120px;
+            height: 120px;
+        }
+
+        .share-url {
+            font-size: 13px;
+            word-break: break-word;
+            color: #1f2937;
+        }
+
+        .share-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .share-actions button {
+            border: 1px solid #cbd5f5;
+            background: transparent;
+            padding: 6px 10px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .session-footer {
+            margin-top: 12px;
+            text-align: center;
+            font-size: 14px;
+            color: #1d4ed8;
+        }
+
+        .share-toggle-btn {
+            border: 1px solid #cbd5f5;
+            background: #e0e7ff;
+            color: #1d4ed8;
+            padding: 10px 16px;
+            border-radius: 999px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        .share-toggle-btn:hover {
+            background: #c7d2fe;
+        }
+
+        .device-drawer {
+            position: fixed;
+            right: 0;
+            top: 0;
+            bottom: 0;
+            width: min(360px, 90vw);
+            background: #ffffff;
+            box-shadow: -12px 0 40px -24px rgba(15, 23, 42, 0.3);
+            transform: translateX(100%);
+            transition: transform 0.3s ease;
+            z-index: 1100;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .device-drawer.open {
+            transform: translateX(0);
+        }
+
+        .device-drawer-header {
+            padding: 18px 20px;
+            border-bottom: 1px solid #e5e7eb;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .device-drawer-body {
+            padding: 20px;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        .drawer-close {
+            background: transparent;
+            border: none;
+            font-size: 20px;
+            cursor: pointer;
+            color: #6b7280;
+        }
+
+        .session-banner {
+            background: rgba(37, 99, 235, 0.1);
+            border-radius: 12px;
+            padding: 12px;
+            font-size: 14px;
+            color: #1d4ed8;
+            margin-bottom: 16px;
+            display: none;
+        }
+
+        .session-banner.active {
+            display: block;
+        }
+
+        @media (max-width: 768px) {
+            .session-card {
+                padding: 24px;
+            }
+
+            .session-actions {
+                flex-direction: column;
+            }
+
+            .session-actions button {
+                flex: 1;
+            }
+
+            .auto-claim {
+                font-size: 13px;
+            }
+
+            .device-drawer {
+                width: 100%;
+            }
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>MCP Voice Interface</h1>
+        <h1>Jarvis MCP</h1>
         
         <div class="status">
             <div class="status-item">
@@ -830,14 +1071,19 @@
             <div class="status-item">
                 <span id="queueCount">Queue: 0</span>
             </div>
+            <div class="status-item">
+                <button id="shareToggle" class="share-toggle-btn">Open on Another Device</button>
+            </div>
         </div>
+
+        <div id="sessionBanner" class="session-banner" role="status" aria-live="polite"></div>
 
         <div class="voice-controls">
             <button class="voice-btn" id="voiceBtn" disabled>
                 <svg class="mic-icon" viewBox="0 0 24 24">
                     <path d="M12 1C10.34 1 9 2.34 9 4V12C9 13.66 10.34 15 12 15C13.66 15 15 13.66 15 12V4C15 2.34 13.66 1 12 1ZM19 12C19 15.53 16.39 18.44 13 18.93V22H11V18.93C7.61 18.44 5 15.53 5 12H7C7 14.76 9.24 17 12 17C14.76 17 17 14.76 17 12H19Z"/>
                 </svg>
-                <span id="voiceBtnText">Start Listening</span>
+                <span id="voiceBtnText">Start Talking</span>
             </button>
 
             <button class="clear-btn" id="clearBtn">Clear Queue</button>
@@ -962,7 +1208,40 @@
         </div>
     </div>
 
+    <div id="sessionOverlay" class="session-overlay">
+        <div class="session-card">
+            <h2>Choose Your Voice Device</h2>
+            <p>Pick where you want to run the voice session.</p>
+            <div class="session-actions">
+                <button id="useHereButton" class="primary-btn" disabled>Use This Device</button>
+                <button id="useOtherButton" class="outline-btn">Use Another Device</button>
+            </div>
+            <div id="autoClaimOption" class="auto-claim" style="display: none;">
+                <label>
+                    <input type="checkbox" id="rememberDeviceToggle" checked>
+                    <span>Reconnect automatically on this device for the next <strong id="rememberDuration">60 minutes</strong>.</span>
+                </label>
+            </div>
+            <div id="shareSection" class="share-section" style="display: none;">
+                <div class="share-grid" id="overlayShareGrid"></div>
+            </div>
+            <div id="overlayFooter" class="session-footer"></div>
+        </div>
+    </div>
+
+    <aside id="deviceDrawer" class="device-drawer">
+        <div class="device-drawer-header">
+            <h3>Open on Another Device</h3>
+            <button id="closeDrawerButton" class="drawer-close" aria-label="Close">×</button>
+        </div>
+        <div class="device-drawer-body">
+            <p style="margin-top:0; color:#475569;">Scan a code or copy a link, then tap “Use This Device” on that browser to claim the session.</p>
+            <div class="share-grid" id="drawerShareGrid"></div>
+        </div>
+    </aside>
+
     <script src="audio-buffer-to-wav.js"></script>
+    <script src="qr.js"></script>
     <script src="app.js?v=14&whisper=pcm"></script>
 </body>
 </html>

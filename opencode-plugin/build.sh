@@ -32,7 +32,7 @@ if [ $? -eq 0 ]; then
     echo "📋 Next steps:"
     echo "1. Copy this plugin folder to your OpenCode plugins directory"
     echo "2. Configure OpenCode to load the plugin"
-    echo "3. Start the MCP Voice Interface server"
+    echo "3. Start the Jarvis MCP server"
     echo "4. Use voice tools in OpenCode sessions"
     echo ""
     echo "🔧 Configuration:"

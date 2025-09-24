@@ -69,7 +69,7 @@ function parseArgs(): CLIOptions {
 
 function showHelp() {
   console.log(`
-MCP Voice Interface - Browser-based voice input/output for AI Assistant conversations
+Jarvis MCP - Browser-based voice input/output for AI Assistant conversations
 
 Usage:
   npx mcp-voice-interface [options]
@@ -105,9 +105,9 @@ async function showVersion() {
     const { readFileSync } = await import('fs');
     const packageJsonPath = join(packageRoot, 'package.json');
     const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
-    console.log(`MCP Voice Interface v${packageJson.version}`);
+    console.log(`Jarvis MCP v${packageJson.version}`);
   } catch {
-    console.log('MCP Voice Interface (version unknown)');
+    console.log('Jarvis MCP (version unknown)');
   }
 }
 
@@ -115,7 +115,7 @@ function installClaudeConfig() {
   const configDir = join(homedir(), 'Library', 'Application Support', 'Claude');
   const configFile = join(configDir, 'claude_desktop_config.json');
   
-  console.log('Installing MCP Voice Interface for Claude Desktop...');
+  console.log('Installing Jarvis MCP for Claude Desktop...');
   
   // Create directory if it doesn't exist
   if (!existsSync(configDir)) {
@@ -150,7 +150,7 @@ function installOpencodeConfig(useLocal: boolean) {
   const configDir = useLocal ? process.cwd() : homedir();
   const configFile = join(configDir, 'opencode.json');
   
-  console.log(`Installing MCP Voice Interface for OpenCode...`);
+  console.log(`Installing Jarvis MCP for OpenCode...`);
   console.log(`Config location: ${configFile}`);
   
   const config = {
@@ -186,7 +186,7 @@ function installClaudeCodeConfig(useLocal: boolean) {
   const configDir = useLocal ? process.cwd() : homedir();
   const configFile = join(configDir, '.mcp.json');
   
-  console.log(`Installing MCP Voice Interface for Claude Code CLI...`);
+  console.log(`Installing Jarvis MCP for Claude Code CLI...`);
   console.log(`Config location: ${configFile}`);
   
   // Claude Code CLI uses .mcp.json with mcpServers format (different from OpenCode)
@@ -246,7 +246,7 @@ function installOpencodePlugin(useLocal: boolean) {
     }
     console.log('2. Start OpenCode');
     console.log('3. Plugin will automatically load and monitor for voice messages');
-    console.log('4. Start MCP Voice Interface server: npx mcp-voice-interface');
+    console.log('4. Start Jarvis MCP server: npx mcp-voice-interface');
     console.log('5. Use voice tools: voice_status(), voice_forward_now(), voice_configure()');
     console.log('');
     console.log('Environment variables (optional):');
@@ -262,7 +262,7 @@ function installOpencodePlugin(useLocal: boolean) {
 }
 
 async function runMCPServer(debugBrowser = false) {
-  console.log('Starting MCP Voice Interface...');
+  console.log('Starting Jarvis MCP...');
   
   // Import and run the main server
   try {

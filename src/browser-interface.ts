@@ -10,8 +10,8 @@ const __dirname = path.dirname(__filename);
 export function createBrowserInterface(
   app: express.Application, 
   voiceQueue: VoiceQueue,
-  onConnect: () => void,
-  onDisconnect: () => void
+  onConnect: (clientId: string, req: express.Request) => void,
+  onDisconnect: (clientId: string) => void
 ) {
   
   // Serve static files from public directory
@@ -34,10 +34,10 @@ export function createBrowserInterface(
 
     const clientId = randomUUID();
     voiceQueue.addSSEClient(clientId, res);
-    onConnect();
+    onConnect(clientId, req);
 
     res.on('close', () => {
-      onDisconnect();
+      onDisconnect(clientId);
     });
   });
 

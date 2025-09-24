@@ -1,6 +1,6 @@
 # OpenCode Voice Interface Plugin
 
-This OpenCode plugin integrates with the MCP Voice Interface to enable voice message forwarding to OpenCode sessions, even when they are busy processing other tasks.
+This OpenCode plugin integrates with the Jarvis MCP to enable voice message forwarding to OpenCode sessions, even when they are busy processing other tasks.
 
 ## Features
 
@@ -27,7 +27,7 @@ This OpenCode plugin integrates with the MCP Voice Interface to enable voice mes
 The plugin can be configured via environment variables:
 
 - `MCP_VOICE_INTERFACE_PORT`: Port number for the voice interface (default: `5114`)
-- `VOICE_INTERFACE_URL`: URL of the MCP Voice Interface (default: `https://localhost:5114`)
+- `VOICE_INTERFACE_URL`: URL of the Jarvis MCP (default: `https://localhost:5114`)
   - Uses HTTPS by default with automatic self-signed certificate handling
 - `VOICE_POLL_INTERVAL`: Polling interval in milliseconds (default: `2000`)
 - `VOICE_MAX_MESSAGES`: Maximum messages to process per poll (default: `5`)
@@ -72,7 +72,7 @@ voice_configure(url="https://localhost:5114", autoForward=true, pollInterval=300
 
 1. **Event Monitoring**: The plugin hooks into various OpenCode events (tool execution, chat messages, etc.)
 
-2. **Voice Message Detection**: On each event, it polls the MCP Voice Interface `/api/status` endpoint to check for pending messages
+2. **Voice Message Detection**: On each event, it polls the Jarvis MCP `/api/status` endpoint to check for pending messages
 
 3. **Message Forwarding**: When pending messages are found, they are forwarded to the current OpenCode session via the internal API
 
@@ -80,9 +80,9 @@ voice_configure(url="https://localhost:5114", autoForward=true, pollInterval=300
 
 5. **Non-blocking Operation**: The forwarding process doesn't block or interfere with ongoing OpenCode operations
 
-## Integration with MCP Voice Interface
+## Integration with Jarvis MCP
 
-This plugin works alongside the main MCP Voice Interface server:
+This plugin works alongside the main Jarvis MCP server:
 
 - **MCP Server**: Handles voice input/output and provides voice tools (`converse`, `speak`, etc.)
 - **OpenCode Plugin**: Forwards voice messages to OpenCode sessions when they're busy
@@ -90,7 +90,7 @@ This plugin works alongside the main MCP Voice Interface server:
 
 ## API Endpoints Used
 
-The plugin communicates with these MCP Voice Interface endpoints:
+The plugin communicates with these Jarvis MCP endpoints:
 
 - `GET /api/status` - Get voice interface status and pending message count
 - Voice messages are read from the status response but not consumed
@@ -146,4 +146,4 @@ npm run dev  # Watch mode
 
 ## License
 
-MIT - Same as the MCP Voice Interface project
+MIT - Same as the Jarvis MCP project

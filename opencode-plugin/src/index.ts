@@ -4,15 +4,15 @@ import { VoiceMessageService } from "./voice-service";
 import { VoiceLogger } from "./voice-logger";
 
 /**
- * OpenCode Plugin for MCP Voice Interface
+ * OpenCode Plugin for Jarvis MCP
  * 
- * This plugin integrates with the MCP Voice Interface to forward voice messages
+ * This plugin integrates with Jarvis MCP to forward voice messages
  * to OpenCode sessions even when they are busy. It monitors various OpenCode events
  * and checks for pending voice messages, then forwards them via the internal API.
  * 
  * Key features:
  * - Monitors OpenCode events (tool execution, chat messages, etc.)
- * - Polls for pending voice messages from MCP Voice Interface
+ * - Polls for pending voice messages from Jarvis MCP
  * - Forwards messages to current session via internal API
  * - Messages remain pending in MCP (not marked as consumed)
  * - Non-blocking operation - doesn't interfere with ongoing sessions
