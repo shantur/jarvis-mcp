@@ -1,6 +1,6 @@
 # Jarvis MCP
 
-Talk to AI assistants using your voice through a web browser. Compatible with Claude Desktop, OpenCode, and other MCP-enabled AI tools.
+Bring your AI to life—talk to assistants instantly in your browser. Compatible with Claude Desktop, OpenCode, and other MCP-enabled AI tools.
 
 > ✅ No extra software, services, or API keys required—just open the web app in your browser and grant microphone access.
 
