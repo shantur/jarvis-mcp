@@ -61,10 +61,10 @@ npm install && npm run build && npm start
 
 ## How to Use
 
-1. **Start the server** - Run `jarvis-mcp`
-2. **Open browser** - Visit `https://localhost:5114` (opens automatically)
-3. **Allow microphone** - Grant permissions when prompted
-4. **Start talking** - Use the `converse` tool in your AI assistant
+1. **Hook it into your AI tool** – Use the install command above for Claude Desktop, OpenCode, or Claude Code so the MCP server is registered.
+2. **Kick off a voice turn** – Call the `converse` tool from your assistant; Jarvis MCP auto-starts in the background and pops open `https://localhost:5114` if needed.
+3. **Allow microphone access** – Approve the browser prompt the first time it appears.
+4. **Talk naturally** – Continue using `converse` for every reply; Jarvis MCP handles the rest.
 
 ### Voice Commands in AI Chat
 
