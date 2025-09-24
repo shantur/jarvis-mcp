@@ -65,10 +65,10 @@ class VoiceInterfaceClient {
         
         // Pause during speech state (default: true to prevent echo/feedback)
         this.pauseDuringSpeech = true;
-        
+
         // Stop AI when user speaks (default: true for natural conversation)
         this.stopAiOnUserSpeech = true;
-        
+
         // Speech recognition language (default: en-US)
         this.selectedLanguage = 'en-US';
 
@@ -137,6 +137,7 @@ class VoiceInterfaceClient {
         this.autoClaimState = this.loadAutoClaimState();
         this.sessionStatusReceived = false;
         this.autoClaimInFlight = false;
+        this.pausedForSpeech = false;
 
         this.updateOverlayFooter('Connecting to voice server…');
         
@@ -219,7 +220,7 @@ class VoiceInterfaceClient {
             }
             
             // Auto-restart if in always-on mode OR if pause is disabled and we should be listening
-            if (this.alwaysOnMode || (!this.pauseDuringSpeech && this.wasListeningBeforeTTS)) {
+            if (!this.pausedForSpeech && (this.alwaysOnMode || (!this.pauseDuringSpeech && this.wasListeningBeforeTTS))) {
                 const reason = this.alwaysOnMode ? 'always-on mode' : 'pause disabled during AI speech';
                 console.log(`[Speech] Auto-restarting recognition in 100ms (${reason})`);
                 this.isAutoRestarting = true;
@@ -636,6 +637,8 @@ class VoiceInterfaceClient {
     }
 
     stopWhisperListening(pauseOnly = false) {
+        this.pausedForSpeech = pauseOnly;
+
         if (this.isListening || pauseOnly) {
             this.isListening = false;
         }
@@ -1402,6 +1405,9 @@ class VoiceInterfaceClient {
             return;
         }
 
+        // Clear pause flag when we attempt to listen again
+        this.pausedForSpeech = false;
+
         if (this.sttMode === 'whisper') {
             this.startWhisperListening();
             return;
@@ -1423,6 +1429,8 @@ class VoiceInterfaceClient {
         if (!this.isListening && this.sttMode !== 'whisper') {
             return;
         }
+
+        this.pausedForSpeech = pauseOnly;
 
         if (this.sttMode === 'whisper') {
             this.stopWhisperListening(pauseOnly);
