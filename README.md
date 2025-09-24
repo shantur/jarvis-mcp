@@ -11,6 +11,7 @@ Bring your AI to life—talk to assistants instantly in your browser. Compatible
 📱 **Remote Access** - Use from phone/tablet while AI runs on computer  
 ⚙️ **Smart Controls** - Collapsible settings, always-on mode, custom voices  
 ⏱️ **Dynamic Timeouts** - Intelligent wait times based on response length  
+🔌 **Optional Whisper Streaming** - Plug into a local Whisper server for low-latency transcripts  
 
 ## Easy Installation
 
@@ -129,6 +130,7 @@ export MCP_VOICE_WHISPER_TOKEN=your_token  # Optional Bearer auth for Whisper se
 - Node.js 18+
 - Google Chrome (only browser tested so far)
 - Microphone access
+- Optional: Local Whisper server (like `pfrankov/whisper-server`) if you want streaming STT via `MCP_VOICE_STT_MODE=whisper`
 
 ## Troubleshooting
 
