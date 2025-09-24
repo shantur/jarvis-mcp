@@ -2,6 +2,8 @@
 
 Talk to AI assistants using your voice through a web browser. Compatible with Claude Desktop, OpenCode, and other MCP-enabled AI tools.
 
+> ✅ No extra software, services, or API keys required—just open the web app in your browser and grant microphone access.
+
 ## Features
 
 🎙️ **Voice Conversations** - Speak naturally with AI assistants  
@@ -118,7 +120,7 @@ export MCP_VOICE_WHISPER_TOKEN=your_token  # Optional Bearer auth for Whisper se
 ## Requirements
 
 - Node.js 18+
-- Modern browser (Chrome/Safari recommended)
+- Google Chrome (only browser tested so far)
 - Microphone access
 
 ## Troubleshooting
