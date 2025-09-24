@@ -139,6 +139,7 @@ class VoiceInterfaceClient {
         this.autoClaimInFlight = false;
         this.pausedForSpeech = false;
         this.alwaysOnResumePending = false;
+        this.pendingListenAfterReconnect = false;
 
         this.updateOverlayFooter('Connecting to voice server…');
         
@@ -1071,6 +1072,11 @@ class VoiceInterfaceClient {
                     this.startListening();
                 }
             }
+
+            if (this.pendingListenAfterReconnect && this.sessionActiveHere) {
+                console.log('[SSE] Pending listen restart detected, starting listening');
+                this.startListening();
+            }
         };
 
         this.eventSource.onmessage = (event) => {
@@ -1090,6 +1096,7 @@ class VoiceInterfaceClient {
             if (this.alwaysOnMode) {
                 console.warn('[SSE] Disconnected while always-on mode active. Suspending listening.');
                 this.alwaysOnResumePending = true;
+                this.pendingListenAfterReconnect = this.sessionActiveHere;
                 this.alwaysOnMode = false;
                 this.updateAlwaysOnUI();
                 this.releaseWakeLock();
@@ -1100,6 +1107,9 @@ class VoiceInterfaceClient {
                 }
             } else if (this.isListening) {
                 this.stopListening();
+                if (this.sessionActiveHere) {
+                    this.pendingListenAfterReconnect = true;
+                }
             }
             
             // Reconnect after 2 seconds
@@ -1433,8 +1443,17 @@ class VoiceInterfaceClient {
             return;
         }
 
+        if (!this.isConnected) {
+            console.warn('[Speech] Cannot start listening while disconnected; deferring until reconnect');
+            if (this.alwaysOnMode || this.alwaysOnResumePending || this.pendingListenAfterReconnect) {
+                this.pendingListenAfterReconnect = true;
+            }
+            return;
+        }
+
         // Clear pause flag when we attempt to listen again
         this.pausedForSpeech = false;
+        this.pendingListenAfterReconnect = false;
 
         if (this.sttMode === 'whisper') {
             this.startWhisperListening();
@@ -1460,6 +1479,10 @@ class VoiceInterfaceClient {
         }
 
         this.pausedForSpeech = pauseOnly;
+
+        if (this.isConnected) {
+            this.pendingListenAfterReconnect = false;
+        }
 
         if (this.isListening) {
             this.isListening = false;
