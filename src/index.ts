@@ -607,9 +607,7 @@ ${status.pendingInput.length > 0 ? '\nPending messages:\n' + status.pendingInput
             };
           }
 
-          const speechMessage = waitForResponse
-            ? `${textToSpeak}\n\nSpeak within ${timeout} seconds.`
-            : textToSpeak;
+          const speechMessage = textToSpeak;
 
           console.error(`[Converse] Speaking: "${speechMessage}"`);
           voiceQueue.broadcastTTS(speechMessage);
@@ -670,9 +668,7 @@ ${status.pendingInput.length > 0 ? '\nPending messages:\n' + status.pendingInput
       }
 
       // Browser interface running AND connected - normal converse flow
-      const speechMessage = waitForResponse
-        ? `${textToSpeak}\n\nSpeak within ${timeout} seconds.`
-        : textToSpeak;
+      const speechMessage = textToSpeak;
 
       console.error(`[Converse] Speaking: "${speechMessage}"`);
       voiceQueue.broadcastTTS(speechMessage);
