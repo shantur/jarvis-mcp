@@ -11,6 +11,7 @@ Bring your AI to life—talk to assistants instantly in your browser. Compatible
 📱 **Remote Access** - Use from phone/tablet while AI runs on computer  
 ⚙️ **Smart Controls** - Collapsible settings, always-on mode, custom voices  
 ⏱️ **Dynamic Timeouts** - Intelligent wait times based on response length  
+🧰 **Zero Extra Software** - Runs entirely in your browser—no extra installs or API keys
 🔌 **Optional Whisper Streaming** - Plug into a local Whisper server for low-latency transcripts  
 
 ## Easy Installation
