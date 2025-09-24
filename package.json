@@ -1,11 +1,11 @@
 {
-  "name": "mcp-voice-interface",
+  "name": "@shantur/jarvis-mcp",
   "version": "1.0.1",
   "description": "Jarvis MCP – Browser-based voice input/output for AI Assistant conversations via MCP (Model Context Protocol)",
   "main": "dist/index.js",
   "type": "module",
   "bin": {
-    "mcp-voice-interface": "dist/cli.js"
+    "jarvis-mcp": "dist/cli.js"
   },
   "scripts": {
     "build": "npm run build:plugin && npm run build:main && npm run postbuild",

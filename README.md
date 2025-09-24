@@ -18,20 +18,20 @@ Bring your AI to life—talk to assistants instantly in your browser. Compatible
 
 **Claude Desktop:**
 ```bash
-npx mcp-voice-interface --install-claude-config
+npx @shantur/jarvis-mcp --install-claude-config
 # Restart Claude Desktop and you're ready!
 ```
 
 **OpenCode (in current project):**
 ```bash
-npx mcp-voice-interface --install-opencode-config --local
-npx mcp-voice-interface --install-opencode-plugin --local
+npx @shantur/jarvis-mcp --install-opencode-config --local
+npx @shantur/jarvis-mcp --install-opencode-plugin --local
 # Start OpenCode and use the converse tool
 ```
 
 **Claude Code CLI:**
 ```bash
-npx mcp-voice-interface --install-claude-code-config --local
+npx @shantur/jarvis-mcp --install-claude-code-config --local
 # Start Claude Code CLI and use voice tools
 ```
 
@@ -46,20 +46,20 @@ npx mcp-voice-interface --install-claude-code-config --local
 
 **From NPM:**
 ```bash
-npm install -g mcp-voice-interface
-mcp-voice-interface
+npm install -g @shantur/jarvis-mcp
+jarvis-mcp
 ```
 
 **From Source:**
 ```bash
 git clone <repository-url>
-cd mcp-voice-interface
+cd jarvis-mcp
 npm install && npm run build && npm start
 ```
 
 ## How to Use
 
-1. **Start the server** - Run `mcp-voice-interface`
+1. **Start the server** - Run `jarvis-mcp`
 2. **Open browser** - Visit `https://localhost:5114` (opens automatically)
 3. **Allow microphone** - Grant permissions when prompted
 4. **Start talking** - Use the `converse` tool in your AI assistant
@@ -116,7 +116,7 @@ export MCP_VOICE_WHISPER_TOKEN=your_token  # Optional Bearer auth for Whisper se
 - To enable it:
   1. Run your Whisper server locally (e.g. `whisper-server` from `pfrankov/whisper-server`).
   2. Set the environment variables above (`MCP_VOICE_STT_MODE=whisper` and the full `MCP_VOICE_WHISPER_URL`).
-  3. Restart `mcp-voice-interface` and hard-refresh the browser (empty-cache reload) to load the streaming bundle.
+  3. Restart `jarvis-mcp` and hard-refresh the browser (empty-cache reload) to load the streaming bundle.
   4. Voice status (`voice_status()` tool) now reports whether Whisper or browser STT is active.
 
 ### Ports

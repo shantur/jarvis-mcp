@@ -72,7 +72,7 @@ function showHelp() {
 Jarvis MCP - Browser-based voice input/output for AI Assistant conversations
 
 Usage:
-  npx mcp-voice-interface [options]
+  npx @shantur/jarvis-mcp [options]
 
 Options:
   --install-claude-config      Install configuration for Claude Desktop
@@ -86,12 +86,12 @@ Options:
   --version, -v                Show version information
 
 Examples:
-  npx mcp-voice-interface                                     # Run the MCP server
-  npx mcp-voice-interface --debug-browser                     # Run with browser interface pre-started
-  npx mcp-voice-interface --install-claude-config            # Setup for Claude Desktop
-  npx mcp-voice-interface --install-opencode-config --local  # Setup for OpenCode in current dir  
-  npx mcp-voice-interface --install-claude-code-config       # Setup for Claude Code CLI
-  npx mcp-voice-interface --install-opencode-plugin --local  # Install OpenCode plugin in project
+  npx @shantur/jarvis-mcp                                     # Run the MCP server
+  npx @shantur/jarvis-mcp --debug-browser                     # Run with browser interface pre-started
+  npx @shantur/jarvis-mcp --install-claude-config            # Setup for Claude Desktop
+  npx @shantur/jarvis-mcp --install-opencode-config --local  # Setup for OpenCode in current dir  
+  npx @shantur/jarvis-mcp --install-claude-code-config       # Setup for Claude Code CLI
+  npx @shantur/jarvis-mcp --install-opencode-plugin --local  # Install OpenCode plugin in project
   
 After installation:
   - Browser interface: https://localhost:5114 (starts automatically on first converse call)
@@ -124,9 +124,9 @@ function installClaudeConfig() {
   
   const config = {
     mcpServers: {
-      'mcp-voice-interface': {
+      'jarvis-mcp': {
         command: 'npx',
-        args: ['mcp-voice-interface']
+        args: ['@shantur/jarvis-mcp']
       }
     }
   };
@@ -156,9 +156,9 @@ function installOpencodeConfig(useLocal: boolean) {
   const config = {
     "$schema": "https://opencode.ai/config.json",
     mcp: {
-      'mcp-voice-interface': {
+      'jarvis-mcp': {
         type: 'local',
-        command: ['npx', 'mcp-voice-interface'],
+        command: ['npx', '@shantur/jarvis-mcp'],
         enabled: true
       }
     }
@@ -192,9 +192,9 @@ function installClaudeCodeConfig(useLocal: boolean) {
   // Claude Code CLI uses .mcp.json with mcpServers format (different from OpenCode)
   const config = {
     mcpServers: {
-      'mcp-voice-interface': {
+      'jarvis-mcp': {
         command: 'npx',
-        args: ['mcp-voice-interface']
+        args: ['@shantur/jarvis-mcp']
       }
     }
   };
@@ -246,7 +246,7 @@ function installOpencodePlugin(useLocal: boolean) {
     }
     console.log('2. Start OpenCode');
     console.log('3. Plugin will automatically load and monitor for voice messages');
-    console.log('4. Start Jarvis MCP server: npx mcp-voice-interface');
+    console.log('4. Start Jarvis MCP server: npx @shantur/jarvis-mcp');
     console.log('5. Use voice tools: voice_status(), voice_forward_now(), voice_configure()');
     console.log('');
     console.log('Environment variables (optional):');

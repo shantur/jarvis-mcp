@@ -767,7 +767,7 @@ ${status.pendingInput.length > 0 ? '\nPending messages:\n' + status.pendingInput
 // Create MCP server for STDIN transport
 const mcpServer = new Server(
   {
-    name: 'mcp-voice-interface',
+    name: '@shantur/jarvis-mcp',
     version: '1.0.0',
   },
   {
