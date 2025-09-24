@@ -35,6 +35,13 @@ npx mcp-voice-interface --install-claude-code-config --local
 # Start Claude Code CLI and use voice tools
 ```
 
+### 🤖 Why Install the OpenCode Plugin?
+
+- Stream voice messages into OpenCode even while tools are running or tasks are in progress.
+- Auto-forward pending Jarvis MCP conversations so you never miss a user request.
+- Works entirely locally—no external services required, just your OpenCode project and browser.
+- Installs with one command and stays in sync with the latest Jarvis MCP features.
+
 ### 📦 Manual Installation
 
 **From NPM:**
