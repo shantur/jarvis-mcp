@@ -1427,17 +1427,27 @@ class VoiceInterfaceClient {
 
     stopListening(pauseOnly = false) {
         if (!this.isListening && this.sttMode !== 'whisper') {
+            this.pausedForSpeech = pauseOnly;
             return;
         }
 
         this.pausedForSpeech = pauseOnly;
+
+        if (this.isListening) {
+            this.isListening = false;
+            this.updateVoiceUI();
+        }
+
+        if (!this.alwaysOnMode || pauseOnly) {
+            this.setVoiceState(false);
+        }
 
         if (this.sttMode === 'whisper') {
             this.stopWhisperListening(pauseOnly);
             return;
         }
 
-        if (!this.recognition || !this.isListening) {
+        if (!this.recognition) {
             return;
         }
 
@@ -1448,7 +1458,17 @@ class VoiceInterfaceClient {
         }
         this.isAutoRestarting = false;
 
-        this.recognition.stop();
+        try {
+            this.recognition.stop();
+        } catch (error) {
+            console.warn('[Speech] Failed to stop recognition cleanly:', error);
+        }
+
+        try {
+            this.recognition.abort();
+        } catch (error) {
+            // abort() throws if stop() already handled it; safe to ignore
+        }
     }
 
     async requestWakeLock() {

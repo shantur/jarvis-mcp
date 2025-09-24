@@ -113,6 +113,7 @@ export MCP_VOICE_WHISPER_TOKEN=your_token  # Optional Bearer auth for Whisper se
 ### Whisper Streaming Mode
 
 - Whisper mode records raw PCM in the browser, converts it to 16 kHz mono WAV, and streams it through the built-in HTTPS proxy, so the local `whisper-server` sees OpenAI-compatible requests.
+- By default we proxy to the standard `whisper-server` endpoint at `http://localhost:12017/v1/audio/transcriptions`; point `MCP_VOICE_WHISPER_URL` at your own host/port if you run it elsewhere.
 - The UI keeps recording while transcripts are in flight and ignores Whisper’s non-verbal tags (e.g. `[BLANK_AUDIO]`, `(typing)`), so only real speech is queued.
 - To enable it:
   1. Run your Whisper server locally (e.g. `whisper-server` from `pfrankov/whisper-server`).
