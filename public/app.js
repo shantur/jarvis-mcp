@@ -138,6 +138,7 @@ class VoiceInterfaceClient {
         this.sessionStatusReceived = false;
         this.autoClaimInFlight = false;
         this.pausedForSpeech = false;
+        this.alwaysOnResumePending = false;
 
         this.updateOverlayFooter('Connecting to voice server…');
         
@@ -1058,8 +1059,20 @@ class VoiceInterfaceClient {
             console.log('[SSE] Connected');
             this.isConnected = true;
             this.updateConnectionUI();
+
+            if (this.alwaysOnResumePending) {
+                console.log('[SSE] Resuming always-on mode after reconnect');
+                this.alwaysOnResumePending = false;
+                this.alwaysOnMode = true;
+                this.updateAlwaysOnUI();
+                this.requestWakeLock();
+                if (this.sessionActiveHere) {
+                    this.setVoiceState(true);
+                    this.startListening();
+                }
+            }
         };
-        
+
         this.eventSource.onmessage = (event) => {
             try {
                 const data = JSON.parse(event.data);
@@ -1073,6 +1086,21 @@ class VoiceInterfaceClient {
             console.error('[SSE] Connection error');
             this.isConnected = false;
             this.updateConnectionUI();
+
+            if (this.alwaysOnMode) {
+                console.warn('[SSE] Disconnected while always-on mode active. Suspending listening.');
+                this.alwaysOnResumePending = true;
+                this.alwaysOnMode = false;
+                this.updateAlwaysOnUI();
+                this.releaseWakeLock();
+                if (this.isListening) {
+                    this.stopListening();
+                } else {
+                    this.setVoiceState(false);
+                }
+            } else if (this.isListening) {
+                this.stopListening();
+            }
             
             // Reconnect after 2 seconds
             setTimeout(() => {
