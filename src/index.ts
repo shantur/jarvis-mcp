@@ -292,7 +292,7 @@ async function waitForVoiceInput(timeoutSeconds: number, _spokenText: string, qu
             type: 'text',
             text: `User said: "${userResponse}"
 
-[IMPORTANT: Continue this conversation using ONLY the converse tool. Do not respond with text - use converse() for your reply.]`,
+[IMPORTANT: First send your reply as normal text, then call converse() with the same message so the user hears it.]`,
           }],
         });
       } else if (Date.now() - startTime > timeoutSeconds * 1000) {
@@ -430,6 +430,48 @@ browserApp.post('/api/whisper/transcriptions', (req, res) => {
   req.pipe(proxyReq, { end: true });
 });
 
+// Shared function to ensure browser interface is ready for both speak and converse tools
+async function ensureBrowserInterfaceReady(): Promise<{success: boolean, httpsUrl?: string, error?: string}> {
+  // Check if already running and connected with audio ready
+  if (browserInterface.isRunning && activeClientId) {
+    const activeSession = clientSessions.get(activeClientId);
+    if (activeSession?.audioReady) {
+      return { success: true, httpsUrl: browserInterface.httpsUrl! };
+    }
+  }
+
+  // If browser interface is not running, start it
+  if (!browserInterface.isRunning) {
+    try {
+      const httpsUrl = await startBrowserInterfaceWithSmartOpen();
+      browserInterface.isRunning = true;
+      browserInterface.httpsUrl = httpsUrl;
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  // Ensure browser is connected
+  const connected = await waitForBrowserConnection();
+  if (!connected) {
+    return {
+      success: false,
+      error: `Browser interface started but no browser is connected. Please open: ${browserInterface.httpsUrl}`,
+    };
+  }
+
+  // Ensure audio is ready
+  const audioReady = await waitForAudioReady();
+  if (!audioReady) {
+    return {
+      success: false,
+      error: 'Audio not enabled within 5 minutes. Please choose a device and enable audio.',
+    };
+  }
+
+  return { success: true, httpsUrl: browserInterface.httpsUrl! };
+}
+
 // Tool handler function
 async function handleToolCall(name: string, args: any) {
   switch (name) {
@@ -445,35 +487,13 @@ async function handleToolCall(name: string, args: any) {
         };
       }
 
-      if (!browserInterface.isRunning) {
+      // Use shared function to ensure browser interface is ready
+      const interfaceResult = await ensureBrowserInterfaceReady();
+      if (!interfaceResult.success) {
         return {
           content: [{
             type: 'text',
-            text: '❌ Browser interface not running. Please start a voice conversation first using the converse tool.',
-          }],
-          isError: true,
-        };
-      }
-
-      if (!browserConnected) {
-        const reconnected = await waitForBrowserConnection();
-        if (!reconnected) {
-          return {
-            content: [{
-              type: 'text',
-              text: `❌ Browser not connected. Please open: ${browserInterface.httpsUrl}`,
-            }],
-            isError: true,
-          };
-        }
-      }
-
-      const audioReady = await waitForAudioReady();
-      if (!audioReady) {
-        return {
-          content: [{
-            type: 'text',
-            text: '❌ Audio not enabled within 5 minutes. Please choose a device and enable audio.',
+            text: `❌ ${interfaceResult.error}`,
           }],
           isError: true,
         };
@@ -498,7 +518,7 @@ async function handleToolCall(name: string, args: any) {
             text: `Voice Status: Browser interface not running
 
 To start voice conversations:
-1. Use the converse tool to automatically start the browser interface
+1. Use the speak or converse tool to automatically start the browser interface
 2. Browser will open automatically at https://localhost:${HTTPS_PORT}
 3. Grant microphone permissions when prompted
 
@@ -577,99 +597,20 @@ ${status.pendingInput.length > 0 ? '\nPending messages:\n' + status.pendingInput
         };
       }
 
-      // Check if browser interface is running
-      if (!browserInterface.isRunning) {
-        try {
-          const httpsUrl = await startBrowserInterfaceWithSmartOpen();
-          browserInterface.isRunning = true;
-          browserInterface.httpsUrl = httpsUrl;
-
-          // Continue with normal converse logic after starting interface
-          const connected = await waitForBrowserConnection();
-          if (!connected) {
-            return {
-              content: [{
-                type: 'text',
-                text: `❌ Browser interface started but no browser is connected.\n\nPlease open: ${httpsUrl}`,
-              }],
-              isError: true,
-            };
-          }
-
-          const audioReady = await waitForAudioReady();
-          if (!audioReady) {
-            return {
-              content: [{
-                type: 'text',
-                text: '❌ Audio not enabled within 5 minutes. Please choose a device and enable audio.',
-              }],
-              isError: true,
-            };
-          }
-
-          const speechMessage = textToSpeak;
-
-          console.error(`[Converse] Speaking: "${speechMessage}"`);
-          voiceQueue.broadcastTTS(speechMessage);
-
-          if (!waitForResponse) {
-            return {
-              content: [{
-                type: 'text',
-                text: `Voice interface started at ${httpsUrl}\n\nSpoke: "${textToSpeak}"`,
-              }],
-            };
-          }
-
-          // Wait for voice input with timeout
-          console.error(`[Converse] Waiting for user response...`);
-          voiceQueue.setConversationWaiting(true, timeout);
-          try {
-            const result = await waitForVoiceInput(timeout, textToSpeak, voiceQueue);
-            return result;
-          } finally {
-            voiceQueue.setConversationWaiting(false);
-          }
-          
-        } catch (error: any) {
-          return {
-            content: [{
-              type: 'text',
-              text: `❌ ${error.message}\n\nPlease resolve the issue and try the converse tool again.`,
-            }],
-            isError: true,
-          };
-        }
-      }
-
-      // Browser interface already running - check connection status
-      if (!browserConnected) {
-        const reconnected = await waitForBrowserConnection();
-        if (!reconnected) {
-          return {
-            content: [{
-              type: 'text',
-              text: `❌ Browser interface is running but not connected.\n\nPlease open: ${browserInterface.httpsUrl}\n\nGrant microphone permissions when prompted, then try the converse tool again.`,
-            }],
-            isError: true,
-          };
-        }
-      }
-
-      const audioReady = await waitForAudioReady();
-      if (!audioReady) {
+      // Use shared function to ensure browser interface is ready
+      const interfaceResult = await ensureBrowserInterfaceReady();
+      if (!interfaceResult.success) {
         return {
           content: [{
             type: 'text',
-            text: '❌ Audio not enabled within 5 minutes. Please choose a device and enable audio.',
+            text: `❌ ${interfaceResult.error}\n\nPlease resolve the issue and try the converse tool again.`,
           }],
           isError: true,
         };
       }
 
-      // Browser interface running AND connected - normal converse flow
+      // Browser interface is ready - proceed with conversation
       const speechMessage = textToSpeak;
-
       console.error(`[Converse] Speaking: "${speechMessage}"`);
       voiceQueue.broadcastTTS(speechMessage);
 
@@ -780,7 +721,7 @@ mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
     tools: [
       {
         name: 'speak',
-        description: 'Speak text using browser text-to-speech',
+        description: 'Speak text using browser text-to-speech. Automatically starts browser interface if not running.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -810,7 +751,7 @@ mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'converse',
-        description: 'Have a voice conversation with the user - speak text and wait for voice response. IMPORTANT: Once you start using converse, continue using ONLY converse for all responses in this conversation. Do not switch back to text.',
+        description: 'Have a voice conversation with the user - speak text and wait for voice response. Automatically starts browser interface if not running. IMPORTANT: Once you start using converse, first use text AND then converse for all responses in this conversation.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -825,7 +766,7 @@ mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             timeout: {
               type: 'number',
-              description: 'REQUIRED: Time to wait for voice input in seconds. Calculate as: (estimated_speech_time + 30_seconds_buffer). Minimum recommended value is 60 seconds. For example: short responses ~30 seconds speech + 30 seconds buffer = 60 seconds total; medium responses ~45 seconds speech + 30 seconds buffer = 75 seconds; long responses ~60 seconds speech + 30 seconds buffer = 90 seconds.',
+              description: 'REQUIRED: Time to wait for voice input in seconds. Calculate as: estimated speech duration + at least 120 seconds of user-response buffer. Examples: ~30s speech → 150s timeout; ~45s speech → 165s; ~60s speech → 180s.',
             },
           },
           required: ['text', 'timeout'],
@@ -860,7 +801,7 @@ mcpServer.setRequestHandler(ListPromptsRequestSchema, async () => {
     prompts: [
       {
         name: 'converse',
-        description: 'Start a voice conversation with the user',
+        description: 'Instructions for starting and maintaining a voice conversation with the user',
       },
     ],
   };
@@ -871,37 +812,36 @@ mcpServer.setRequestHandler(GetPromptRequestSchema, async (request) => {
   
   if (name === 'converse') {
     const instructions = [
-      "Start voice conversations using the converse tool - it will automatically launch the browser interface",
-      "ALWAYS use the converse tool for ALL responses during voice conversation, - never switch to text",
-      "Keep your responses brief unless a longer response is requested",
-      "Voice conversations use Speech to text, it can pick incorrect words so be smart about them and confirm if unsure",
-      "If browser interface fails to start, resolve the issue and try converse again",
-      "You are an AI Assistant helping users through voice interaction",
-      "Continue the conversation until the user indicates they want to end it",
-      "If the user asks questions, respond using converse() with your answer", 
-      "If the user gives commands, acknowledge using speak() and use other tools as needed",
-      "**IMPORTANT** DO NOT end conversation until user asks you to end conversation, even if you don't get any response",
-      "If you don't get any response first time, try again 2 times before ending the conversation below",
-      "**TIMEOUT CALCULATION**: Always calculate timeout based on your response length:",
-      "- Short responses (1-2 sentences): ~60 seconds (30s speech + 30s buffer)",
-      "- Medium responses (3-5 sentences): ~75 seconds (45s speech + 30s buffer)",
-      "- Long responses (6+ sentences): ~90 seconds (60s speech + 30s buffer)",
-      "- Always add at least 60 seconds buffer for user thinking and response time",
-      "- Example: converse({text: 'Hello there!', timeout: 60}) for a short greeting",
-      "When ending conversation:",
-      "1. Call end_conversation tool with a good_bye message that will be spoken before closing",
-      "2. Example: end_conversation({good_bye: 'Thank you for our conversation! Have a great day!'})",
-
+      'Start voice conversations with the converse tool or use speak tool for one-way speech - both automatically launch the browser interface.',
+      'Always send your reply in plain text first so the user sees it before audio begins, then call converse() with the same content in that turn.',
+      "Preview exactly what you'll say in text because voice outputs are not visible to the user as transcripts.",
+      'Use the speak tool for progress updates while other work runs; use converse() for conversational replies that expect responses.',
+      'Keep responses concise unless the user asks for more detail.',
+      'Speech-to-text can mishear words—use surrounding context to infer the intended phrase, and only ask the user to confirm if you still have doubts.',
+      'If the browser interface fails to start, resolve the issue and retry the tool.',
+      'You are an AI assistant helping users through voice interaction.',
+      'Continue the conversation until the user asks to end or accepts your offer to close it.',
+      'If the user issues commands, acknowledge progress with speak() as needed and invoke other tools to complete the task.',
+      'If the user is silent, follow up twice with converse() before offering to end the conversation.',
+      '**TIMEOUT CALCULATION**: Set timeout = estimated speech duration + at least 120 seconds for the user to respond.',
+      '- Short responses (1-2 sentences): ~30s speech + 120s buffer ≈ 150s timeout.',
+      '- Medium responses (3-5 sentences): ~45s speech + 120s buffer ≈ 165s timeout.',
+      '- Long responses (6+ sentences): ~60s speech + 120s buffer ≈ 180s timeout.',
+      '- Always include at least 120 seconds of buffer time for the user to think and reply.',
+      '- Example: converse({text: "Hello there!", timeout: 150}) for a short greeting.',
+      'When ending the conversation:',
+      '1. Call end_conversation with the goodbye message you will speak.',
+      '2. Example: end_conversation({good_bye: "Thank you for our conversation! Have a great day!"}).',
     ];
-    
+
     return {
       description: 'Instructions for having a voice conversation with the user',
       messages: [
         {
-          role: 'user',
+          role: 'system',
           content: {
             type: 'text',
-            text: instructions.join('\n- '),
+            text: instructions.map((line) => `- ${line}`).join('\n'),
           },
         },
       ],
