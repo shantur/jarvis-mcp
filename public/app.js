@@ -77,8 +77,8 @@ class VoiceInterfaceClient {
         this.speechTimeout = null;
         this.speechTimeoutDuration = 2000; // 2 seconds of silence before sending
 
-        // AI speech display timeout
-        this.aiSpeechHideTimeout = null;
+        // AI speech display state
+        // (timeout no longer needed - text persists until user responds)
 
         // Conversation timeout tracking
         this.conversationDeadline = null;
@@ -269,7 +269,7 @@ class VoiceInterfaceClient {
                 speechSynthesis.cancel();
                 this.isSpeaking = false;
                 this.updateSpeakingStatus(false);
-                this.hideAISpeech();
+                // Keep the AI text visible when interrupted - user might be responding to it
             }
             
             // Validate and display transcript
@@ -1048,6 +1048,67 @@ class VoiceInterfaceClient {
 
         return cleaned;
     }
+
+    stripBasicMarkdown(text) {
+        if (typeof text !== 'string') {
+            return '';
+        }
+
+        // Prefer library-based conversion when available
+        if (window.marked && window.DOMPurify) {
+            try {
+                const html = window.marked.parse(text, { breaks: true, gfm: true });
+                const sanitized = window.DOMPurify.sanitize(html, { USE_PROFILES: { html: true } });
+                const temp = document.createElement('div');
+                temp.innerHTML = sanitized;
+                return temp.textContent || temp.innerText || '';
+            } catch (error) {
+                console.error('[Markdown] Failed to strip markdown via renderer, falling back:', error);
+            }
+        }
+
+        // Lightweight fallback strip for key markdown characters
+        return text
+            .replace(/[\*_`~]/g, '')
+            .replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1')
+            .replace(/[#>\[\]()]/g, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    renderMarkdown(text) {
+        if (typeof text !== 'string' || text.length === 0) {
+            return '';
+        }
+
+        const source = text.replace(/\r\n/g, '\n');
+
+        if (window.marked && window.DOMPurify) {
+            try {
+                const html = window.marked.parse(source, {
+                    gfm: true,
+                    breaks: true,
+                    headerIds: false,
+                    mangle: false
+                });
+                return window.DOMPurify.sanitize(html, { USE_PROFILES: { html: true } });
+            } catch (error) {
+                console.error('[Markdown] Failed to render via marked, using fallback:', error);
+            }
+        }
+
+        // Fallback: escape HTML and convert simple newlines
+        return this.escapeHtml(source).replace(/\n/g, '<br />');
+    }
+
+    escapeHtml(text) {
+        return text
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
     
     initializeEventSource() {
         if (this.eventSource) {
@@ -1345,6 +1406,9 @@ class VoiceInterfaceClient {
 
         console.log('[API] Sending voice input:', cleaned);
 
+        // Clear AI speech display when user sends their response
+        this.clearAISpeechDisplay();
+
         try {
             const response = await fetch(`${this.baseUrl}/api/voice-input`, {
                 method: 'POST',
@@ -1423,6 +1487,21 @@ class VoiceInterfaceClient {
         if (this.alwaysOnMode && this.isListening) {
             // In always-on mode and currently listening, clicking should toggle always-on off
             this.toggleAlwaysOnMode();
+            return;
+        }
+
+        // If AI is speaking and user wants to start talking (not in always-on mode)
+        if (!this.isListening && this.isSpeaking && this.stopAiOnUserSpeech && !this.alwaysOnMode) {
+            console.log('[Speech] User pressed Start Talking - stopping AI speech to allow user input');
+            // Stop AI speech
+            speechSynthesis.cancel();
+            this.isSpeaking = false;
+            this.updateSpeakingStatus(false);
+            // Don't call onAISpeechComplete() - keep text visible as user wants to respond
+            // Reset the wasListeningBeforeTTS flag to prevent automatic restart
+            this.wasListeningBeforeTTS = false;
+            // Start listening immediately
+            this.startListening();
             return;
         }
 
@@ -1784,7 +1863,8 @@ class VoiceInterfaceClient {
                 this.ensureListeningActive();
             }
             
-            const utterance = new SpeechSynthesisUtterance(text);
+            const sanitizedSpeech = this.stripBasicMarkdown(text);
+            const utterance = new SpeechSynthesisUtterance(sanitizedSpeech);
             
             // Use the current speed from the slider
             const speed = parseFloat(this.speedSlider.value);
@@ -1808,7 +1888,7 @@ class VoiceInterfaceClient {
                 console.log('[TTS] Finished speaking');
                 this.isSpeaking = false;
                 this.updateSpeakingStatus(false);
-                this.hideAISpeech();
+                this.onAISpeechComplete();
                 
                 // Resume listening based on pause setting and mode
                 console.log('[TTS] Speech ended. Checking listening state:', {
@@ -1849,7 +1929,7 @@ class VoiceInterfaceClient {
                 console.error('[TTS] Speech error:', event);
                 this.isSpeaking = false;
                 this.updateSpeakingStatus(false);
-                this.hideAISpeech();
+                this.onAISpeechComplete();
                 
                 // Resume listening on error too
                 if (!this.isListening) {
@@ -1989,13 +2069,8 @@ class VoiceInterfaceClient {
     }
     
     showAISpeech(text) {
-        // Cancel any pending hide timeout when showing new speech
-        if (this.aiSpeechHideTimeout) {
-            clearTimeout(this.aiSpeechHideTimeout);
-            this.aiSpeechHideTimeout = null;
-        }
-        
-        this.aiSpeechText.textContent = text;
+        // Display new AI speech text with lightweight Markdown formatting
+        this.aiSpeechText.innerHTML = this.renderMarkdown(text);
         this.aiSpeechDisplay.style.display = 'block';
         console.log('[UI] Showing AI speech:', text);
         
@@ -2020,20 +2095,16 @@ class VoiceInterfaceClient {
         }
     }
     
-    hideAISpeech() {
-        // Clear any pending hide timeout
-        if (this.aiSpeechHideTimeout) {
-            clearTimeout(this.aiSpeechHideTimeout);
-        }
-        
-        this.aiSpeechHideTimeout = setTimeout(() => {
-            // Only hide if we're not currently speaking (prevents hiding during interruptions)
-            if (!this.isSpeaking) {
-                this.aiSpeechDisplay.style.display = 'none';
-                this.aiSpeechText.textContent = '';
-                console.log('[UI] Hiding AI speech display');
-            }
-        }, 1000); // Keep visible for 1 second after speech ends
+    onAISpeechComplete() {
+        // AI speech has completed - keep the text visible for user reference
+        console.log('[UI] AI speech complete - text remains visible for user reference');
+    }
+    
+    clearAISpeechDisplay() {
+        // Clear the AI speech display when user responds
+        this.aiSpeechDisplay.style.display = 'none';
+        this.aiSpeechText.textContent = '';
+        console.log('[UI] Clearing AI speech display after user response');
     }
     
     loadVoices() {
